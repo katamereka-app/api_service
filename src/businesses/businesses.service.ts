@@ -174,6 +174,8 @@ export class BusinessesService {
         category: b.category,
         rating: b.externalRating,
         reviews_count: b.externalReviewsCount,
+        status: b.status,
+        updated_at: b.updatedAt,
       })),
       pagination: {
         page,
