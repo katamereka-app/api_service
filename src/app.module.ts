@@ -9,6 +9,7 @@ import { User } from './users/entities/user.entity.js';
 import { OtpCode } from './auth/entities/otp-code.entity.js';
 import { Business } from './businesses/entities/business.entity.js';
 import { BusinessMember } from './businesses/entities/business-member.entity.js';
+import { UserBusinessHistory } from './businesses/entities/user-business-history.entity.js';
 import { BusinessClaim } from './business-claims/entities/business-claim.entity.js';
 import { Review } from './reviews/entities/review.entity.js';
 import { ReviewReply } from './reviews/entities/review-reply.entity.js';
@@ -50,6 +51,7 @@ import { CmsModule } from './cms/cms.module.js';
           OtpCode,
           Business,
           BusinessMember,
+          UserBusinessHistory,
           BusinessClaim,
           Review,
           ReviewReply,

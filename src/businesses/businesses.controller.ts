@@ -52,6 +52,22 @@ export class BusinessesController {
     return this.businessesService.getMyBusinesses(req.user.id);
   }
 
+  @UseGuards(AuthGuard('jwt'))
+  @Get('my-recently-viewed')
+  async getRecentlyViewed(@Request() req: any, @Query('limit') limit?: number) {
+    return this.businessesService.getRecentlyViewed(req.user.id, limit ? Number(limit) : 30);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('businesses/:businessId/view')
+  async recordView(@Request() req: any, @Param('businessId') businessId: string) {
+    await this.businessesService.recordBusinessView(req.user.id, businessId);
+    return {
+      success: true,
+      message: 'Berhasil mencatat riwayat penelusuran bisnis',
+    };
+  }
+
   @UseGuards(AuthGuard('jwt'), BusinessMemberGuard)
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Request() req: any, @Param('businessId') businessId: string) {

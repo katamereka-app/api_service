@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Business, BusinessStatus } from './entities/business.entity.js';
 import { BusinessMember, BusinessRole } from './entities/business-member.entity.js';
+import { UserBusinessHistory } from './entities/user-business-history.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { CreateBusinessDto, UpdateBusinessDto, AddBusinessMemberDto, SyncGoogleBusinessDto } from './dto/business.dto.js';
 import { SyncBusinessesDto } from './dto/sync-businesses.dto.js';
@@ -23,6 +24,8 @@ export class BusinessesService {
     private readonly businessRepository: Repository<Business>,
     @InjectRepository(BusinessMember)
     private readonly memberRepository: Repository<BusinessMember>,
+    @InjectRepository(UserBusinessHistory)
+    private readonly historyRepository: Repository<UserBusinessHistory>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly providerService: ProviderService,
@@ -325,6 +328,72 @@ export class BusinessesService {
     };
   }
 
+  async recordBusinessView(userId: string, businessId: string) {
+    if (!userId || !businessId) return;
+
+    try {
+      let history = await this.historyRepository.findOne({ where: { userId, businessId } });
+      if (history) {
+        history.viewedAt = new Date();
+        await this.historyRepository.save(history);
+      } else {
+        history = this.historyRepository.create({
+          userId,
+          businessId,
+          viewedAt: new Date(),
+        });
+        await this.historyRepository.save(history);
+      }
+
+      // Max 30 items per user constraint
+      const userHistories = await this.historyRepository.find({
+        where: { userId },
+        order: { viewedAt: 'DESC' },
+      });
+
+      if (userHistories.length > 30) {
+        const overflow = userHistories.slice(30);
+        await this.historyRepository.remove(overflow);
+      }
+    } catch (err) {
+      this.logger.error(`Gagal mencatat view history user ${userId} untuk bisnis ${businessId}:`, err);
+    }
+  }
+
+  async getRecentlyViewed(userId: string, limit: number = 30) {
+    const take = limit > 30 ? 30 : (limit < 1 ? 10 : limit);
+
+    const histories = await this.historyRepository.find({
+      where: { userId },
+      relations: { business: true },
+      order: { viewedAt: 'DESC' },
+      take,
+    });
+
+    return {
+      success: true,
+      message: 'Berhasil mengambil daftar bisnis terakhir dilihat',
+      data: histories
+        .filter((h) => h.business)
+        .map((h) => ({
+          id: h.business.id,
+          name: h.business.name,
+          slug: h.business.slug,
+          address: h.business.address,
+          city: h.business.city,
+          province: h.business.province,
+          category: h.business.category,
+          rating: h.business.averageRating ? Number(h.business.averageRating) : (h.business.externalRating ? Number(h.business.externalRating) : 0),
+          reviews_count: (h.business.reviewCount && h.business.reviewCount > 0) ? h.business.reviewCount : (h.business.externalReviewsCount ?? 0),
+          logo_url: h.business.logoUrl,
+          cover_url: h.business.coverUrl,
+          is_claimed: h.business.isClaimed,
+          status: h.business.status,
+          viewed_at: h.viewedAt,
+        })),
+    };
+  }
+
   async getMyBusinesses(userId: string) {
     const memberships = await this.memberRepository.find({
       where: { userId },
@@ -345,6 +414,10 @@ export class BusinessesService {
     const business = await this.businessRepository.findOne({ where: { id } });
     if (!business) {
       throw new NotFoundException('Bisnis tidak ditemukan');
+    }
+
+    if (currentUserId) {
+      this.recordBusinessView(currentUserId, id).catch(() => {});
     }
 
     const members = await this.memberRepository.find({
