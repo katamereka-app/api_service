@@ -101,6 +101,10 @@ export class BusinessesService {
         if (item.website) existing.website = item.website;
         if (item.category) existing.category = item.category;
         if (item.categories) existing.categories = item.categories;
+        if (item.openingHours) existing.openingHours = item.openingHours;
+        if (item.facilities) existing.facilities = item.facilities;
+        if (item.catering) existing.catering = item.catering;
+        if (item.externalMetadata) existing.externalMetadata = item.externalMetadata;
         if (item.externalRating !== null) existing.externalRating = item.externalRating;
         if (item.externalReviewsCount !== null) existing.externalReviewsCount = item.externalReviewsCount;
         existing.externalSyncedAt = item.externalSyncedAt;
@@ -133,6 +137,10 @@ export class BusinessesService {
         website: item.website,
         category: item.category,
         categories: item.categories,
+        openingHours: item.openingHours,
+        facilities: item.facilities,
+        catering: item.catering,
+        externalMetadata: item.externalMetadata,
         externalRating: item.externalRating,
         externalReviewsCount: item.externalReviewsCount,
         status: BusinessStatus.ACTIVE,

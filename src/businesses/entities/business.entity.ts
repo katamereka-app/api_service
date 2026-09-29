@@ -96,6 +96,15 @@ export class Business {
   @Column({ type: 'jsonb', nullable: true, name: 'opening_hours' })
   openingHours: Record<string, any> | null;
 
+  @Column({ type: 'jsonb', nullable: true })
+  facilities: Record<string, any> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  catering: Record<string, any> | null;
+
+  @Column({ type: 'jsonb', nullable: true, name: 'external_metadata' })
+  externalMetadata: Record<string, any> | null;
+
   @Column({ type: 'jsonb', nullable: true, name: 'social_media' })
   socialMedia: Record<string, any> | null;
 

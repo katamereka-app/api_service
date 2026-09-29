@@ -15,6 +15,10 @@ export interface NormalizedGeoapifyBusiness {
   website: string | null;
   category: string | null;
   categories: string[] | null;
+  openingHours: any | null;
+  facilities: Record<string, any> | null;
+  catering: Record<string, any> | null;
+  externalMetadata: Record<string, any> | null;
   externalRating: number | null;
   externalReviewsCount: number | null;
   externalSyncedAt: Date;

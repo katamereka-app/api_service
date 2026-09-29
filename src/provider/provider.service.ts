@@ -18,6 +18,7 @@ export class ProviderService {
 
     const featuresMap = new Map<string, any>();
     const fetchLimit = Math.max(limit, 100);
+    const detailsParam = 'details=details,details.catering,details.contact,details.facilities,details.payment';
 
     try {
       // 1. Geocode location untuk mendapatkan place_id area
@@ -28,8 +29,8 @@ export class ProviderService {
         const locPlaceId = locData?.features?.[0]?.properties?.place_id;
 
         if (locPlaceId) {
-          // Query Places API v2 dengan limit 100
-          const placesUrl = `https://api.geoapify.com/v2/places?categories=commercial,catering,service,accommodation,rental,leisure,office&filter=place:${locPlaceId}&text=${encodeURIComponent(keyword)}&limit=${fetchLimit}&apiKey=${apiKey}`;
+          // Query Places API v2 dengan details parameter lengkap
+          const placesUrl = `https://api.geoapify.com/v2/places?categories=commercial,catering,service,accommodation,rental,leisure,office&filter=place:${locPlaceId}&text=${encodeURIComponent(keyword)}&limit=${fetchLimit}&${detailsParam}&apiKey=${apiKey}`;
           const placesRes = await fetch(placesUrl);
           if (placesRes.ok) {
             const placesData = await placesRes.json();
@@ -58,7 +59,7 @@ export class ProviderService {
         }
       }
 
-      // 3. Fallback/Multi-category expansion jika jumlah masih kurang dari target limit
+      // 3. Multi-category expansion jika jumlah kurang dari limit
       if (featuresMap.size < fetchLimit) {
         const categoryKeywords = ['hotel', 'restaurant', 'cafe', 'rental', 'shop', 'service', 'market'];
         for (const catKw of categoryKeywords) {
@@ -94,32 +95,70 @@ export class ProviderService {
   normalizeBusiness(feature: any): NormalizedGeoapifyBusiness {
     const props = feature?.properties || {};
     const coords = feature?.geometry?.coordinates || [];
+    const raw = props.datasource?.raw || {};
 
-    const name = props.name || props.address_line1 || 'Bisnis Tanpa Nama';
+    // 1. Identitas & Nama
+    const name = props.name || props.address_line1 || raw.name || 'Bisnis Tanpa Nama';
     const slug = this.slugify(name);
 
+    // 2. Kategori Taksonomi
     const categoriesArray: string[] = Array.isArray(props.categories) ? props.categories : [];
-    const mainCategory = categoriesArray.length > 0 ? categoriesArray[categoriesArray.length - 1] : null;
+    const mainCategory = categoriesArray.length > 0 ? categoriesArray[categoriesArray.length - 1] : (raw.amenity || raw.shop || null);
+
+    // 3. Fallback Kontak: Top-Level -> Nested Contact -> Raw OSM Tags
+    const phone = props.contact?.phone || props.phone || raw.phone || raw['contact:phone'] || null;
+    const email = props.contact?.email || props.email || raw.email || raw['contact:email'] || null;
+    const website = props.contact?.website || props.website || props.url || raw.website || raw['contact:website'] || null;
+
+    // 4. Fallback Jam Operasional
+    const openingHours = props.opening_hours || raw.opening_hours || null;
+
+    // 5. Fasilitas & Katering
+    const facilities = props.facilities || {
+      wheelchair: props.wheelchair ?? (raw.wheelchair === 'yes' ? true : raw.wheelchair === 'no' ? false : null),
+      internet_access: props.internet_access || raw.internet_access || null,
+      payment_options: props.payment || raw.payment || null,
+    };
+
+    const catering = props.catering || {
+      takeaway: props.takeaway ?? (raw.takeaway === 'yes' ? true : raw.takeaway === 'no' ? false : null),
+      delivery: props.delivery ?? (raw.delivery === 'yes' ? true : raw.delivery === 'no' ? false : null),
+      outdoor_seating: props.outdoor_seating || raw.outdoor_seating || null,
+      cuisine: raw.cuisine || null,
+    };
+
+    // 6. Alamat & Wilayah
+    const address = props.address_line1 || props.formatted || raw.address || null;
+    const city = props.city || props.county || props.district || raw.city || null;
+    const province = props.state || props.region || raw.state || null;
+    const country = props.country || props.country_code?.toUpperCase() || 'ID';
+    const postalCode = props.postcode || raw.postcode || null;
+    const latitude = props.lat || (coords.length > 1 ? coords[1] : null);
+    const longitude = props.lon || (coords.length > 0 ? coords[0] : null);
 
     return {
       externalSource: 'GEOAPIFY',
       externalId: props.place_id || props.id || null,
-      name: name,
-      slug: slug,
-      address: props.address_line1 || props.formatted || null,
-      city: props.city || props.county || null,
-      province: props.state || props.region || null,
-      country: props.country || props.country_code?.toUpperCase() || 'ID',
-      postalCode: props.postcode || null,
-      latitude: props.lat || (coords.length > 1 ? coords[1] : null),
-      longitude: props.lon || (coords.length > 0 ? coords[0] : null),
-      phone: props.contact?.phone || props.phone || null,
-      email: props.contact?.email || props.email || null,
-      website: props.website || props.url || null,
+      name,
+      slug,
+      address,
+      city,
+      province,
+      country,
+      postalCode,
+      latitude,
+      longitude,
+      phone,
+      email,
+      website,
       category: mainCategory,
       categories: categoriesArray,
+      openingHours: typeof openingHours === 'string' ? { raw: openingHours } : openingHours,
+      facilities,
+      catering,
+      externalMetadata: props, // RETENSI TOTAL: Menyimpan seluruh atribut GeoJSON mentah + raw OSM tags
       externalRating: props.rank?.popularity ? parseFloat((props.rank.popularity * 5).toFixed(2)) : 4.5,
-      externalReviewsCount: props.datasource?.raw?.votes ? parseInt(props.datasource.raw.votes, 10) : 12,
+      externalReviewsCount: raw.votes ? parseInt(raw.votes, 10) : 12,
       externalSyncedAt: new Date(),
     };
   }
