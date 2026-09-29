@@ -13,6 +13,12 @@ import { BusinessClaim } from './business-claims/entities/business-claim.entity.
 import { Review } from './reviews/entities/review.entity.js';
 import { ReviewReply } from './reviews/entities/review-reply.entity.js';
 import { ReviewReport } from './review-reports/entities/review-report.entity.js';
+import { CmsContent } from './cms/entities/cms-content.entity.js';
+import { ContentSeo } from './cms/entities/content-seo.entity.js';
+import { ContentRevision } from './cms/entities/content-revision.entity.js';
+import { CmsCategory } from './cms/entities/cms-category.entity.js';
+import { CmsTag } from './cms/entities/cms-tag.entity.js';
+import { CmsMedia } from './cms/entities/cms-media.entity.js';
 
 import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -22,6 +28,7 @@ import { ReviewsModule } from './reviews/reviews.module.js';
 import { DataForSeoModule } from './dataforseo/dataforseo.module.js';
 import { AdminManagementModule } from './admin-management/admin-management.module.js';
 import { ReviewReportsModule } from './review-reports/review-reports.module.js';
+import { CmsModule } from './cms/cms.module.js';
 
 @Module({
   imports: [
@@ -38,7 +45,22 @@ import { ReviewReportsModule } from './review-reports/review-reports.module.js';
         username: configService.get<string>('DATABASE_USER') || 'postgres',
         password: configService.get<string>('DATABASE_PASSWORD') || 'bismillah_transgo_emas',
         database: configService.get<string>('DATABASE_NAME') || 'katamereka_db',
-        entities: [User, OtpCode, Business, BusinessMember, BusinessClaim, Review, ReviewReply, ReviewReport],
+        entities: [
+          User,
+          OtpCode,
+          Business,
+          BusinessMember,
+          BusinessClaim,
+          Review,
+          ReviewReply,
+          ReviewReport,
+          CmsContent,
+          ContentSeo,
+          ContentRevision,
+          CmsCategory,
+          CmsTag,
+          CmsMedia,
+        ],
         synchronize: true,
       }),
     }),
@@ -50,6 +72,7 @@ import { ReviewReportsModule } from './review-reports/review-reports.module.js';
     DataForSeoModule,
     AdminManagementModule,
     ReviewReportsModule,
+    CmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
