@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsEmail,
   IsObject,
   IsOptional,
@@ -17,6 +18,16 @@ export class UpdateBusinessProfileDto {
   @IsString()
   @MaxLength(2000)
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  short_description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  photos?: string[];
 
   @IsOptional()
   @IsString()
