@@ -87,11 +87,22 @@ export class Business {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  // Short, single-line summary for SEO meta descriptions / listing cards —
+  // `description` is the long free-text "About" copy and is too long/variable
+  // to safely drop into a <meta name="description"> tag.
+  @Column({ type: 'varchar', length: 300, nullable: true, name: 'short_description' })
+  shortDescription: string | null;
+
   @Column({ type: 'text', nullable: true, name: 'logo_url' })
   logoUrl: string | null;
 
   @Column({ type: 'text', nullable: true, name: 'cover_url' })
   coverUrl: string | null;
+
+  // Gallery image URLs, distinct from logo_url/cover_url — backs the
+  // profile page's "Foto" tab.
+  @Column({ type: 'jsonb', nullable: true })
+  photos: string[] | null;
 
   @Column({ type: 'jsonb', nullable: true, name: 'opening_hours' })
   openingHours: Record<string, any> | null;

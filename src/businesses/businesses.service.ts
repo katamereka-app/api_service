@@ -595,6 +595,7 @@ export class BusinessesService {
         name: business.name,
         slug: business.slug,
         description: business.description,
+        short_description: business.shortDescription,
         phone: business.phone,
         email: business.email,
         website: business.website,
@@ -606,7 +607,9 @@ export class BusinessesService {
         categories: business.categories || [],
         logo_url: business.logoUrl,
         cover_url: business.coverUrl,
+        photos: business.photos || [],
         opening_hours: business.openingHours || {},
+        facilities: business.facilities || {},
         social_media: business.socialMedia || {},
         latitude: business.latitude,
         longitude: business.longitude,
@@ -624,6 +627,8 @@ export class BusinessesService {
 
     if (dto.name !== undefined) business.name = dto.name;
     if (dto.description !== undefined) business.description = dto.description;
+    if (dto.short_description !== undefined) business.shortDescription = dto.short_description;
+    if (dto.photos !== undefined) business.photos = dto.photos;
     if (dto.phone !== undefined) business.phone = dto.phone;
     if (dto.email !== undefined) business.email = dto.email;
     if (dto.website !== undefined) business.website = dto.website;
@@ -651,6 +656,7 @@ export class BusinessesService {
         id: business.id,
         name: business.name,
         description: business.description,
+        short_description: business.shortDescription,
         phone: business.phone,
         email: business.email,
         website: business.website,
@@ -661,7 +667,9 @@ export class BusinessesService {
         category: business.category,
         logo_url: business.logoUrl,
         cover_url: business.coverUrl,
+        photos: business.photos || [],
         opening_hours: business.openingHours || {},
+        facilities: business.facilities || {},
         social_media: business.socialMedia || {},
         profile_completion: completion.profile_completion,
         profile_completed: completion.profile_completed,
@@ -764,6 +772,20 @@ export class BusinessesService {
     };
   }
 
+  /**
+   * Backs GET /businesses/slug/:slug and /businesses/public-profile/:slug —
+   * i.e. the business profile page's server-side metadata/JSON-LD fetch AND
+   * the page's own client-side data fetch. Used to return only
+   * average_rating/review_count and left out latitude/longitude/status/
+   * categories/postal_code/short_description/photos entirely, which meant:
+   * - the FE's `rating`/`reviews_count`/`externalRating`/
+   *   `externalReviewsCount` fields (and this SEO fix's review-count-based
+   *   meta description, and the JSON-LD aggregateRating/geo blocks) always
+   *   read undefined and silently fell back to 0/blank, regardless of the
+   *   real DB values.
+   * The field set below matches ApiBusinessDetail on the FE (katamereka-web
+   * lib/api-client.ts) field-for-field.
+   */
   async getPublicProfile(slug: string) {
     const business = await this.businessRepository.findOne({ where: { slug } });
     if (!business) {
@@ -772,22 +794,37 @@ export class BusinessesService {
 
     return {
       success: true,
+      message: 'Berhasil mengambil profil publik bisnis',
       data: {
         id: business.id,
         slug: business.slug,
         name: business.name,
         description: business.description,
+        short_description: business.shortDescription,
         logo_url: business.logoUrl,
         cover_url: business.coverUrl,
+        photos: business.photos || [],
         category: business.category,
+        categories: business.categories || [],
         address: business.address,
         city: business.city,
         province: business.province,
+        country: business.country,
+        postal_code: business.postalCode,
+        latitude: business.latitude,
+        longitude: business.longitude,
         phone: business.phone,
         email: business.email,
         website: business.website,
         opening_hours: business.openingHours || {},
+        facilities: business.facilities || {},
         social_media: business.socialMedia || {},
+        status: business.status,
+        rating: business.averageRating ? parseFloat(business.averageRating.toString()) : null,
+        reviews_count: business.reviewCount || 0,
+        externalRating: business.externalRating,
+        externalReviewsCount: business.externalReviewsCount,
+        // Kept for any existing caller still reading the old field names.
         average_rating: business.averageRating ? parseFloat(business.averageRating.toString()) : 0,
         review_count: business.reviewCount || 0,
       },
