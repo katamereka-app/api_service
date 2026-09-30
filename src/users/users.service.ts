@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import bcrypt from 'bcryptjs';
 import { User, UserStatus, PlatformRole } from './entities/user.entity.js';
+import { Review } from '../reviews/entities/review.entity.js';
+import { UserFavoriteBusiness } from '../businesses/entities/user-favorite-business.entity.js';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto.js';
 
 @Injectable()
@@ -10,6 +12,10 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Review)
+    private readonly reviewRepository: Repository<Review>,
+    @InjectRepository(UserFavoriteBusiness)
+    private readonly favoriteRepository: Repository<UserFavoriteBusiness>,
   ) {}
 
   async findAll() {
@@ -122,4 +128,46 @@ export class UsersService {
       message: 'User berhasil dihapus',
     };
   }
+
+  async getProfileSummary(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User tidak ditemukan');
+    }
+
+    const totalReviews = await this.reviewRepository.count({ where: { userId } });
+    const totalSavedBusinesses = await this.favoriteRepository.count({ where: { userId } });
+
+    return {
+      success: true,
+      message: 'Berhasil mengambil ringkasan profil customer',
+      data: {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          isVerified: !!user.emailVerifiedAt,
+          createdAt: user.createdAt,
+        },
+        stats: {
+          totalReviews,
+          totalHelpfulVotes: 0,
+          totalSavedBusinesses,
+        },
+      },
+    };
+  }
 }
+

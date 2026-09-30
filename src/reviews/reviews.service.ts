@@ -504,4 +504,40 @@ export class ReviewsService {
       message: 'Balasan berhasil dihapus',
     };
   }
+
+  async getMyReviews(userId: string) {
+    const reviews = await this.reviewRepository.find({
+      where: { userId },
+      relations: { business: true },
+      order: { createdAt: 'DESC' },
+    });
+
+    const data = reviews.map((review) => ({
+      id: review.id,
+      rating: review.rating,
+      title: review.title,
+      content: review.content,
+      status: review.status,
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+      business: review.business
+        ? {
+            id: review.business.id,
+            name: review.business.name,
+            slug: review.business.slug,
+            category: review.business.category,
+            address: review.business.address,
+            city: review.business.city,
+            logoUrl: review.business.logoUrl,
+          }
+        : null,
+    }));
+
+    return {
+      success: true,
+      message: 'Berhasil mengambil ulasan milik pengguna',
+      data,
+    };
+  }
 }
+

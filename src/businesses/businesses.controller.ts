@@ -71,6 +71,12 @@ export class BusinessesController {
   }
 
   @UseGuards(AuthGuard('jwt'))
+  @Delete('businesses/:businessId/favorite')
+  async removeFavorite(@Request() req: any, @Param('businessId') businessId: string) {
+    return this.businessesService.toggleFavorite(req.user.id, businessId);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Post('businesses/:businessId/view')
   async recordView(@Request() req: any, @Param('businessId') businessId: string) {
     await this.businessesService.recordBusinessView(req.user.id, businessId);

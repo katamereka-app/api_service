@@ -21,6 +21,12 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @UseGuards(AuthGuard('jwt'))
+  @Get('my-reviews')
+  async getMyReviews(@Request() req: any) {
+    return this.reviewsService.getMyReviews(req.user.id);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Post('businesses/:businessId/reviews')
   async createReview(
     @Request() req: any,
