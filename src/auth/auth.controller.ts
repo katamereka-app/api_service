@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import { RegisterDto, LoginDto, ChangePasswordDto, SendOtpDto, VerifyOtpDto, ResetPasswordDto } from './dto/auth.dto.js';
 import { AuthGuard } from '@nestjs/passport';
@@ -36,5 +36,14 @@ export class AuthController {
   @Post('change-password')
   async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(req.user.id, dto);
+  }
+
+  // Live role/businessRole lookup for the current token — the frontend's
+  // middleware calls this instead of verifying the JWT signature itself, so
+  // no JWT_SECRET needs to be duplicated into a second deployment's env.
+  @UseGuards(AuthGuard('jwt'))
+  @Get('me')
+  async me(@Request() req: any) {
+    return this.authService.getMe(req.user.id);
   }
 }

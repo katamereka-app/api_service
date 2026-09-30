@@ -167,8 +167,7 @@ export class AuthService {
 
     // Business membership is looked up server-side and signed into the token —
     // the frontend must never be trusted to assert its own business context.
-    const membership = await this.businessMemberRepository.findOne({ where: { userId: user.id } });
-    const businessRole = membership?.role ?? null;
+    const businessRole = await this.getBusinessRole(user.id);
 
     const token = this.generateToken(user.id, user.email, user.role, businessRole);
 
@@ -226,6 +225,33 @@ export class AuthService {
 
     otp.isUsed = true;
     await this.otpRepository.save(otp);
+  }
+
+  private async getBusinessRole(userId: string): Promise<string | null> {
+    const membership = await this.businessMemberRepository.findOne({ where: { userId } });
+    return membership?.role ?? null;
+  }
+
+  // Live claims for the current token — see AuthController.me(). Lets the
+  // frontend confirm role/businessRole by asking the API directly instead
+  // of independently verifying the JWT signature (which would require
+  // duplicating JWT_SECRET into a second deployment's environment).
+  async getMe(userId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User tidak ditemukan');
+    }
+
+    const businessRole = await this.getBusinessRole(user.id);
+
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      status: user.status,
+      role: user.role,
+      businessRole,
+    };
   }
 
   private generateToken(
