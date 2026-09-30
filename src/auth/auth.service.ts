@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { User, UserStatus } from '../users/entities/user.entity.js';
+import { BusinessMember } from '../businesses/entities/business-member.entity.js';
 import { OtpCode, OtpType } from './entities/otp-code.entity.js';
 import { MailService } from './mail.service.js';
 import { RegisterDto, LoginDto, ChangePasswordDto, SendOtpDto, VerifyOtpDto, ResetPasswordDto } from './dto/auth.dto.js';
@@ -15,6 +16,8 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(OtpCode)
     private readonly otpRepository: Repository<OtpCode>,
+    @InjectRepository(BusinessMember)
+    private readonly businessMemberRepository: Repository<BusinessMember>,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
   ) {}
@@ -107,7 +110,8 @@ export class AuthService {
 
     await this.userRepository.save(user);
 
-    const token = this.generateToken(user.id, user.email);
+    // Fresh signup never has a business membership yet.
+    const token = this.generateToken(user.id, user.email, user.role, null);
 
     return {
       message: 'Registrasi berhasil',
@@ -116,6 +120,8 @@ export class AuthService {
         name: user.name,
         email: user.email,
         status: user.status,
+        role: user.role,
+        businessRole: null,
       },
       accessToken: token,
     };
@@ -159,7 +165,12 @@ export class AuthService {
     user.lastLoginAt = new Date();
     await this.userRepository.save(user);
 
-    const token = this.generateToken(user.id, user.email);
+    // Business membership is looked up server-side and signed into the token —
+    // the frontend must never be trusted to assert its own business context.
+    const membership = await this.businessMemberRepository.findOne({ where: { userId: user.id } });
+    const businessRole = membership?.role ?? null;
+
+    const token = this.generateToken(user.id, user.email, user.role, businessRole);
 
     return {
       message: 'Login berhasil',
@@ -168,6 +179,8 @@ export class AuthService {
         name: user.name,
         email: user.email,
         status: user.status,
+        role: user.role,
+        businessRole,
       },
       accessToken: token,
     };
@@ -215,7 +228,12 @@ export class AuthService {
     await this.otpRepository.save(otp);
   }
 
-  private generateToken(userId: string, email: string): string {
-    return this.jwtService.sign({ sub: userId, email });
+  private generateToken(
+    userId: string,
+    email: string,
+    role: string,
+    businessRole: string | null,
+  ): string {
+    return this.jwtService.sign({ sub: userId, email, role, businessRole });
   }
 }
