@@ -10,6 +10,8 @@ import { OtpCode } from './auth/entities/otp-code.entity.js';
 import { Business } from './businesses/entities/business.entity.js';
 import { BusinessMember } from './businesses/entities/business-member.entity.js';
 import { UserBusinessHistory } from './businesses/entities/user-business-history.entity.js';
+import { UserFavoriteBusiness } from './businesses/entities/user-favorite-business.entity.js';
+import { CustomerLog } from './customer-logs/entities/customer-log.entity.js';
 import { BusinessClaim } from './business-claims/entities/business-claim.entity.js';
 import { Review } from './reviews/entities/review.entity.js';
 import { ReviewReply } from './reviews/entities/review-reply.entity.js';
@@ -30,6 +32,7 @@ import { DataForSeoModule } from './dataforseo/dataforseo.module.js';
 import { AdminManagementModule } from './admin-management/admin-management.module.js';
 import { ReviewReportsModule } from './review-reports/review-reports.module.js';
 import { CmsModule } from './cms/cms.module.js';
+import { CustomerLogsModule } from './customer-logs/customer-logs.module.js';
 
 @Module({
   imports: [
@@ -52,6 +55,8 @@ import { CmsModule } from './cms/cms.module.js';
           Business,
           BusinessMember,
           UserBusinessHistory,
+          UserFavoriteBusiness,
+          CustomerLog,
           BusinessClaim,
           Review,
           ReviewReply,
@@ -66,6 +71,7 @@ import { CmsModule } from './cms/cms.module.js';
         synchronize: true,
       }),
     }),
+    CustomerLogsModule,
     AuthModule,
     UsersModule,
     BusinessesModule,

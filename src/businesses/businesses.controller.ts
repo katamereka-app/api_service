@@ -59,6 +59,18 @@ export class BusinessesController {
   }
 
   @UseGuards(AuthGuard('jwt'))
+  @Get('my-favorites')
+  async getFavorites(@Request() req: any) {
+    return this.businessesService.getFavorites(req.user.id);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('businesses/:businessId/favorite')
+  async toggleFavorite(@Request() req: any, @Param('businessId') businessId: string) {
+    return this.businessesService.toggleFavorite(req.user.id, businessId);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Post('businesses/:businessId/view')
   async recordView(@Request() req: any, @Param('businessId') businessId: string) {
     await this.businessesService.recordBusinessView(req.user.id, businessId);

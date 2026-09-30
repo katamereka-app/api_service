@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Business, BusinessStatus } from './entities/business.entity.js';
 import { BusinessMember, BusinessRole } from './entities/business-member.entity.js';
 import { UserBusinessHistory } from './entities/user-business-history.entity.js';
+import { UserFavoriteBusiness } from './entities/user-favorite-business.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { CreateBusinessDto, UpdateBusinessDto, AddBusinessMemberDto, SyncGoogleBusinessDto } from './dto/business.dto.js';
 import { SyncBusinessesDto } from './dto/sync-businesses.dto.js';
@@ -14,6 +15,8 @@ import { NormalizedGeoapifyBusiness } from '../provider/interfaces/normalized-ge
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto.js';
 import { calculateProfileCompletion } from './helpers/profile-completion.helper.js';
 import { StorageService } from './storage/storage.service.js';
+import { CustomerLogsService } from '../customer-logs/customer-logs.service.js';
+import { ActionType } from '../customer-logs/entities/customer-log.entity.js';
 
 @Injectable()
 export class BusinessesService {
@@ -26,10 +29,13 @@ export class BusinessesService {
     private readonly memberRepository: Repository<BusinessMember>,
     @InjectRepository(UserBusinessHistory)
     private readonly historyRepository: Repository<UserBusinessHistory>,
+    @InjectRepository(UserFavoriteBusiness)
+    private readonly favoriteRepository: Repository<UserFavoriteBusiness>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly providerService: ProviderService,
     private readonly storageService: StorageService,
+    private readonly customerLogsService: CustomerLogsService,
   ) {}
 
   async syncBusinesses(dto: SyncBusinessesDto) {
@@ -830,4 +836,87 @@ export class BusinessesService {
       },
     };
   }
+
+  async toggleFavorite(userId: string, businessId: string) {
+    const business = await this.businessRepository.findOne({ where: { id: businessId } });
+    if (!business) {
+      throw new NotFoundException('Bisnis tidak ditemukan');
+    }
+
+    const existingFav = await this.favoriteRepository.findOne({
+      where: { userId, businessId },
+    });
+
+    if (existingFav) {
+      await this.favoriteRepository.remove(existingFav);
+
+      // Log ke CustomerLogs
+      await this.customerLogsService.logAction(userId, ActionType.DELETE, {
+        action: 'UNFAVORITE_BUSINESS',
+        businessId: business.id,
+        businessName: business.name,
+      });
+
+      return {
+        success: true,
+        message: 'Bisnis berhasil dihapus dari daftar favorit',
+        isFavorite: false,
+      };
+    } else {
+      const newFav = this.favoriteRepository.create({
+        userId,
+        businessId,
+      });
+      await this.favoriteRepository.save(newFav);
+
+      // Log ke CustomerLogs
+      await this.customerLogsService.logAction(userId, ActionType.CREATE, {
+        action: 'FAVORITE_BUSINESS',
+        businessId: business.id,
+        businessName: business.name,
+      });
+
+      return {
+        success: true,
+        message: 'Bisnis berhasil ditambahkan ke daftar favorit',
+        isFavorite: true,
+      };
+    }
+  }
+
+  async getFavorites(userId: string) {
+    const favorites = await this.favoriteRepository.find({
+      where: { userId },
+      relations: { business: true },
+      order: { createdAt: 'DESC' },
+    });
+
+    const data = favorites.map((fav) => ({
+      favoriteId: fav.id,
+      favoritedAt: fav.createdAt,
+      business: {
+        id: fav.business.id,
+        name: fav.business.name,
+        slug: fav.business.slug,
+        category: fav.business.category,
+        address: fav.business.address,
+        city: fav.business.city,
+        province: fav.business.province,
+        country: fav.business.country,
+        externalRating: fav.business.externalRating,
+        externalReviewsCount: fav.business.externalReviewsCount,
+        averageRating: fav.business.averageRating,
+        reviewCount: fav.business.reviewCount,
+        logoUrl: fav.business.logoUrl,
+        coverUrl: fav.business.coverUrl,
+      },
+    }));
+
+    return {
+      success: true,
+      message: 'Berhasil mengambil daftar bisnis favorit',
+      data,
+    };
+  }
 }
+
