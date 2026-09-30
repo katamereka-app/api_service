@@ -38,6 +38,31 @@ export class BusinessesService {
     private readonly customerLogsService: CustomerLogsService,
   ) {}
 
+  /**
+   * Notifies Google (via its documented sitemap ping endpoint) that
+   * sitemap.xml has fresh content, instead of waiting for Googlebot's own
+   * crawl schedule to pick it up. Fire-and-forget on purpose — a slow/failed
+   * ping must never delay or fail the business write that triggered it, and
+   * there's nothing actionable to do with the result besides log it.
+   *
+   * Not the Google Indexing API: that one is restricted by Google's ToS to
+   * JobPosting/BroadcastEvent content and would risk a penalty here. The
+   * sitemap ping is the documented, general-purpose mechanism.
+   */
+  private pingSitemapUpdate(): void {
+    const siteUrl = process.env.CONSUMER_SITE_URL || 'https://katamereka.id';
+    const sitemapUrl = `${siteUrl}/sitemap.xml`;
+    const pingUrl = `https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`;
+
+    fetch(pingUrl)
+      .then((res) => {
+        this.logger.log(`Ping sitemap ke Google: ${res.status} (${sitemapUrl})`);
+      })
+      .catch((err) => {
+        this.logger.warn(`Gagal ping sitemap ke Google: ${err}`);
+      });
+  }
+
   async syncBusinesses(dto: SyncBusinessesDto) {
     this.logger.log(`Memulai Sync Business dari Provider dengan Keyword: "${dto.keyword}", Location: "${dto.location}"`);
 
@@ -62,6 +87,12 @@ export class BusinessesService {
         this.logger.error(`Gagal upsert bisnis "${item.name}":`, err);
         failed++;
       }
+    }
+
+    // Once for the whole batch, not per item — a sync can touch up to
+    // `limit` businesses and the sitemap only needs one fresh-content signal.
+    if (inserted > 0 || updated > 0) {
+      this.pingSitemapUpdate();
     }
 
     return {
@@ -526,6 +557,7 @@ export class BusinessesService {
     });
 
     await this.memberRepository.save(member);
+    this.pingSitemapUpdate();
 
     return {
       message: 'Bisnis berhasil dibuat',
@@ -546,6 +578,7 @@ export class BusinessesService {
     if (dto.status) business.status = dto.status;
 
     await this.businessRepository.save(business);
+    this.pingSitemapUpdate();
 
     return {
       message: 'Data bisnis berhasil diperbarui',
@@ -654,6 +687,7 @@ export class BusinessesService {
     }
 
     await this.businessRepository.save(business);
+    this.pingSitemapUpdate();
 
     return {
       success: true,
