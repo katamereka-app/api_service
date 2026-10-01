@@ -10,6 +10,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Review, ReviewStatus } from './entities/review.entity.js';
 import { ReviewReply } from './entities/review-reply.entity.js';
+import { ReviewReport } from '../review-reports/entities/review-report.entity.js';
+import { ReviewReportStatus } from '../review-reports/enums/review-report-status.enum.js';
 import { Business } from '../businesses/entities/business.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { CreateReviewDto } from './dto/create-review.dto.js';
@@ -28,6 +30,8 @@ export class ReviewsService {
     private readonly reviewRepository: Repository<Review>,
     @InjectRepository(ReviewReply)
     private readonly replyRepository: Repository<ReviewReply>,
+    @InjectRepository(ReviewReport)
+    private readonly reviewReportRepository: Repository<ReviewReport>,
     @InjectRepository(Business)
     private readonly businessRepository: Repository<Business>,
     @InjectRepository(User)
@@ -367,6 +371,29 @@ export class ReviewsService {
       queryBuilder.andWhere('reply.id IS NULL');
     }
 
+    if (query.verified === true) {
+      queryBuilder.andWhere('user.email_verified_at IS NOT NULL');
+    } else if (query.verified === false) {
+      queryBuilder.andWhere('user.email_verified_at IS NULL');
+    }
+
+    if (query.source) {
+      queryBuilder.andWhere('review.source = :source', { source: query.source });
+    }
+
+    if (query.search) {
+      queryBuilder.andWhere('(review.content ILIKE :search OR user.name ILIKE :search)', {
+        search: `%${query.search}%`,
+      });
+    }
+
+    if (query.reported) {
+      queryBuilder.andWhere(
+        `EXISTS (SELECT 1 FROM review_reports rr WHERE rr.review_id = review.id AND rr.status = :reportedStatus)`,
+        { reportedStatus: ReviewReportStatus.PENDING },
+      );
+    }
+
     switch (query.sort) {
       case ReviewSortOption.OLDEST:
         queryBuilder.orderBy('review.createdAt', 'ASC');
@@ -388,6 +415,22 @@ export class ReviewsService {
     const [items, total] = await queryBuilder.getManyAndCount();
     const totalPages = Math.ceil(total / limit);
 
+    const reviewIds = items.map((r) => r.id);
+    const reportCountByReview = new Map<string, number>();
+    if (reviewIds.length > 0) {
+      const counts = await this.reviewReportRepository
+        .createQueryBuilder('report')
+        .select('report.reviewId', 'reviewId')
+        .addSelect('COUNT(*)', 'count')
+        .where('report.reviewId IN (:...reviewIds)', { reviewIds })
+        .andWhere('report.status = :status', { status: ReviewReportStatus.PENDING })
+        .groupBy('report.reviewId')
+        .getRawMany();
+      for (const row of counts) {
+        reportCountByReview.set(row.reviewId, parseInt(row.count, 10));
+      }
+    }
+
     return {
       data: items.map((r) => ({
         id: r.id,
@@ -395,6 +438,9 @@ export class ReviewsService {
         title: r.title,
         content: r.content,
         status: r.status,
+        source: r.source,
+        is_verified: !!r.user?.emailVerifiedAt,
+        report_count: reportCountByReview.get(r.id) ?? 0,
         created_at: r.createdAt,
         user: {
           id: r.user?.id,

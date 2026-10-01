@@ -20,6 +20,15 @@ export enum ReviewStatus {
   REMOVED = 'REMOVED',
 }
 
+// Where the review originated. Every review currently enters through the
+// KataMereka platform itself (no external ingestion pipeline exists yet) —
+// GOOGLE/WEBSITE are reserved for a future import feature.
+export enum ReviewSource {
+  KATAMEREKA = 'KATAMEREKA',
+  GOOGLE = 'GOOGLE',
+  WEBSITE = 'WEBSITE',
+}
+
 @Entity('reviews')
 @Unique(['userId', 'businessId'])
 @Index(['businessId', 'status'])
@@ -59,6 +68,13 @@ export class Review {
     default: ReviewStatus.PUBLISHED,
   })
   status: ReviewStatus;
+
+  @Column({
+    type: 'enum',
+    enum: ReviewSource,
+    default: ReviewSource.KATAMEREKA,
+  })
+  source: ReviewSource;
 
   @OneToOne('ReviewReply', (reply: any) => reply.review)
   reply: ReviewReply | null;
