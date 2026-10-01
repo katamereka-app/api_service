@@ -9,7 +9,7 @@ import { BusinessesService } from './businesses.service.js';
 import { BusinessesController } from './businesses.controller.js';
 import { ProviderModule } from '../provider/provider.module.js';
 import { StorageService } from './storage/storage.service.js';
-import { LocalStorageService } from './storage/local-storage.service.js';
+import { S3StorageService } from './storage/s3-storage.service.js';
 
 @Module({
   imports: [
@@ -27,7 +27,7 @@ import { LocalStorageService } from './storage/local-storage.service.js';
     BusinessesService,
     {
       provide: StorageService,
-      useClass: LocalStorageService,
+      useClass: S3StorageService,
     },
   ],
   exports: [BusinessesService, TypeOrmModule],

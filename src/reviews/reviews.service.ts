@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Review, ReviewStatus } from './entities/review.entity.js';
 import { ReviewReply } from './entities/review-reply.entity.js';
+import { ReviewHelpful } from './entities/review-helpful.entity.js';
 import { Business } from '../businesses/entities/business.entity.js';
 import { User } from '../users/entities/user.entity.js';
 import { CreateReviewDto } from './dto/create-review.dto.js';
@@ -28,6 +29,8 @@ export class ReviewsService {
     private readonly reviewRepository: Repository<Review>,
     @InjectRepository(ReviewReply)
     private readonly replyRepository: Repository<ReviewReply>,
+    @InjectRepository(ReviewHelpful)
+    private readonly helpfulRepository: Repository<ReviewHelpful>,
     @InjectRepository(Business)
     private readonly businessRepository: Repository<Business>,
     @InjectRepository(User)
@@ -538,6 +541,44 @@ export class ReviewsService {
       message: 'Berhasil mengambil ulasan milik pengguna',
       data,
     };
+  }
+
+  async toggleHelpful(userId: string, reviewId: string) {
+    const review = await this.reviewRepository.findOne({ where: { id: reviewId } });
+    if (!review) {
+      throw new NotFoundException('Ulasan tidak ditemukan');
+    }
+
+    const existingVote = await this.helpfulRepository.findOne({
+      where: { reviewId, userId },
+    });
+
+    if (existingVote) {
+      // Unlike (batal vote helpful)
+      await this.helpfulRepository.remove(existingVote);
+      review.helpfulCount = Math.max(0, (review.helpfulCount || 0) - 1);
+      await this.reviewRepository.save(review);
+
+      return {
+        success: true,
+        message: 'Vote helpful berhasil dihapus',
+        isHelpful: false,
+        helpfulCount: review.helpfulCount,
+      };
+    } else {
+      // Like (tambah vote helpful)
+      const newVote = this.helpfulRepository.create({ reviewId, userId });
+      await this.helpfulRepository.save(newVote);
+      review.helpfulCount = (review.helpfulCount || 0) + 1;
+      await this.reviewRepository.save(review);
+
+      return {
+        success: true,
+        message: 'Vote helpful berhasil ditambahkan',
+        isHelpful: true,
+        helpfulCount: review.helpfulCount,
+      };
+    }
   }
 }
 

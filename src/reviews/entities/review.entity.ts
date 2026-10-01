@@ -60,6 +60,9 @@ export class Review {
   })
   status: ReviewStatus;
 
+  @Column({ type: 'int', default: 0, name: 'helpful_count' })
+  helpfulCount: number;
+
   @OneToOne('ReviewReply', (reply: any) => reply.review)
   reply: ReviewReply | null;
 

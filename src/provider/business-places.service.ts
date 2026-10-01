@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BusinessPlaceResult } from './interfaces/business-place-result.interface.js';
+import { StorageService } from '../businesses/storage/storage.service.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class BusinessPlacesService {
   private readonly logger = new Logger(BusinessPlacesService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly storageService: StorageService,
+  ) { }
 
   async searchBusinessPlaces(keyword: string, location: string, limit: number = 20): Promise<BusinessPlaceResult[]> {
     const geoapifyApiKey = this.configService.get<string>('GEOAPIFY_API_KEY');
@@ -59,7 +65,7 @@ export class BusinessPlacesService {
             const categories = props.categories || [];
 
             let imageUrl: string | null = null;
-            let imageSource: 'wikimedia' | 'google' | 'none' = 'none';
+            let imageSource: 'wikimedia' | 'google' | 'google_internal' | 'foursquare' | 'geoapify_map' | 'none' = 'none';
 
             // 1.a & 1.b Cek field properties.wiki_and_media.wikimedia_commons atau wikidata
             const wikiMedia = props.wiki_and_media || props.details?.wiki_and_media;
@@ -73,14 +79,31 @@ export class BusinessPlacesService {
               }
             }
 
-            // 2. FALLBACK GAMBAR (Google Places API / Google Cloud)
+            // 2. FALLBACK GAMBAR (Foursquare Places API - Gratis & Real Photo)
+            const fsqApiKey = this.configService.get<string>('FOURSQUARE_API_KEY');
+            if (!imageUrl && fsqApiKey) {
+              const fsqPhotoUrl = await this.fetchFoursquarePhotoUrl(name, lat, lon, fsqApiKey);
+              if (fsqPhotoUrl) {
+                imageUrl = fsqPhotoUrl;
+                imageSource = 'foursquare';
+              }
+            }
+
+            // 3. FALLBACK GAMBAR (Google Places API / Google Cloud) -> AUTO SAVE TO INTERNAL STORAGE
             if (!imageUrl && googleApiKey) {
               this.logger.log(`[Fallback Gambar Google] Seeking Google Places Photo for "${name}" at (${lat}, ${lon})`);
               const googlePhotoUrl = await this.fetchGooglePhotoUrl(name, lat, lon, googleApiKey);
               if (googlePhotoUrl) {
-                imageUrl = googlePhotoUrl;
-                imageSource = 'google';
+                // Auto Upload / Save buffer to Internal Storage (S3 / Local Storage)
+                imageUrl = await this.savePhotoToInternalStorage(googlePhotoUrl, id);
+                imageSource = 'google_internal';
               }
+            }
+
+            // 4. FALLBACK GAMBAR ASLI GEOAPIFY (Geoapify Static Location Map Photo)
+            if (!imageUrl && geoapifyApiKey && lat && lon) {
+              imageUrl = `https://maps.geoapify.com/v1/staticmap?style=osm-bright-smooth&width=600&height=400&center=lonlat:${lon},${lat}&zoom=16&marker=lonlat:${lon},${lat};color:%23ff2b2b;size:medium&apiKey=${geoapifyApiKey}`;
+              imageSource = 'geoapify_map';
             }
 
             results.push({
@@ -150,6 +173,35 @@ export class BusinessPlacesService {
     return null;
   }
 
+  // Resolusi Gambar via Foursquare Places API v3 (Search Venue -> Venue Photos)
+  private async fetchFoursquarePhotoUrl(name: string, lat: number, lon: number, apiKey: string): Promise<string | null> {
+    try {
+      const headers = {
+        Authorization: apiKey,
+        Accept: 'application/json',
+      };
+      const searchUrl = `https://api.foursquare.com/v3/places/search?query=${encodeURIComponent(name)}&ll=${lat},${lon}&limit=1`;
+      const res = await fetch(searchUrl, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const fsqId = data?.results?.[0]?.fsq_id;
+        if (fsqId) {
+          const photosUrl = `https://api.foursquare.com/v3/places/${fsqId}/photos?limit=1`;
+          const photoRes = await fetch(photosUrl, { headers });
+          if (photoRes.ok) {
+            const photos = await photoRes.json();
+            if (photos && photos.length > 0) {
+              return `${photos[0].prefix}original${photos[0].suffix}`;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Gagal fetch Foursquare photo for "${name}":`, err);
+    }
+    return null;
+  }
+
   // 2. Fetch Photo via Google Places API (Find Place -> Photos API)
   private async fetchGooglePhotoUrl(name: string, lat: number, lon: number, apiKey: string): Promise<string | null> {
     try {
@@ -167,6 +219,23 @@ export class BusinessPlacesService {
       this.logger.error(`Gagal fetch Google Places photo for "${name}":`, err);
     }
     return null;
+  }
+
+  // Auto-download external photo and save to internal S3 / MinIO storage
+  private async savePhotoToInternalStorage(externalPhotoUrl: string, placeId: string): Promise<string> {
+    try {
+      const cleanId = placeId.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+      const filename = `place_${cleanId}.jpg`;
+      const res = await fetch(externalPhotoUrl);
+      if (res.ok) {
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        return await this.storageService.uploadBuffer(buffer, filename, 'places');
+      }
+    } catch (err) {
+      this.logger.error(`Gagal menyimpan foto internal S3 untuk ID "${placeId}":`, err);
+    }
+    return externalPhotoUrl;
   }
 
   // 3. Total Failover ke Google Places API (Nearby Search / Text Search)

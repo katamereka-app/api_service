@@ -20,6 +20,18 @@ export class LocalStorageService implements StorageService {
     return `/uploads/${folder}/${filename}`;
   }
 
+  async uploadBuffer(buffer: Buffer, filename: string, folder: string): Promise<string> {
+    const uploadDir = path.join(process.cwd(), 'uploads', folder);
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadDir, filename);
+    await fs.promises.writeFile(filePath, buffer);
+
+    return `/uploads/${folder}/${filename}`;
+  }
+
   async deleteFile(fileUrl: string): Promise<void> {
     if (!fileUrl) return;
     try {

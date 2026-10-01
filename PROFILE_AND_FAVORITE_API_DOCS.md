@@ -38,7 +38,7 @@ Mengambil data identitas pengguna serta statistik jumlah ulasan dan bisnis yang 
       },
       "stats": {
         "totalReviews": 1,
-        "totalHelpfulVotes": 0,
+        "totalHelpfulVotes": 5,
         "totalSavedBusinesses": 1
       }
     }
@@ -243,3 +243,76 @@ Mengambil jejak rekam aktivitas terbaru pengguna (misal: saat menfavoritkan, men
     ]
   }
   ```
+
+---
+
+## 5. 🏨 Pencarian Tempat Bisnis & Auto-Upload Foto S3 (`/business-places/search`)
+
+### 5.1 Pencarian Bisnis dengan Dynamic Fallback & Auto-Save ke AWS S3
+Endpoint ini digunakan untuk mencari daftar tempat bisnis (hotel, restoran, tempat wisata, dll) secara real-time berdasarkan kata kunci dan lokasi. Foto gedung asli bisnis ditarik dari Google Maps dan **otomatis di-upload ke AWS S3 Bucket internal** (`https://transgo-minio.s3.ap-southeast-1.amazonaws.com`).
+
+* **HTTP Method**: `GET`
+* **URL**: `/business-places/search`
+* **Query Parameters**:
+  * `keyword` *(string, optional)*: Kata kunci pencarian (contoh: `hotel`, `restoran`, `cafe`). Default: `hotel`.
+  * `location` *(string, optional)*: Area kota/lokasi pencarian (contoh: `Bandung`, `Jakarta`, `Surabaya`). Default: `Bandung`.
+  * `limit` *(number, optional)*: Jumlah maksimal data yang ingin diambil. Default: `20`.
+* **Headers**:
+  ```http
+  Content-Type: application/json
+  ```
+
+#### **Response `200 OK`**:
+```json
+{
+  "success": true,
+  "message": "Berhasil mengambil daftar tempat bisnis dengan hierarki fallback",
+  "total": 20,
+  "data": [
+    {
+      "id": "51951617eef2e65a40597d5d372720c81bc0f00102f901a00daf25000000009203134462657374204578707265737320486f74656c",
+      "name": "Dbest Express Hotel",
+      "address": "Dbest Express Hotel, Jalan Madurasa Tengah, Cigereleng, Bandung City 40243, West Java, Indonesia",
+      "latitude": -6.9454351,
+      "longitude": 107.6085772,
+      "categories": [
+        "accommodation",
+        "accommodation.hotel",
+        "building",
+        "building.accommodation"
+      ],
+      "imageUrl": "https://transgo-minio.s3.ap-southeast-1.amazonaws.com/kabarify/places/place_51951617eef2e65a40597d5d372720c81bc0f001.jpg",
+      "imageSource": "google_internal",
+      "dataSource": "geoapify"
+    },
+    {
+      "id": "512d8e500313e65a4059cda9113642c81bc0f00102f901b213e725000000009203144c6f736d656e204c657577692050616e6a616e67",
+      "name": "Losmen Leuwi Panjang",
+      "address": "Losmen Leuwi Panjang, Jalur Masuk Bus, Situ Saeur, Bandung City 40236, West Java, Indonesia",
+      "latitude": -6.9455653,
+      "longitude": 107.5949104,
+      "categories": [
+        "accommodation",
+        "accommodation.hotel"
+      ],
+      "imageUrl": "https://transgo-minio.s3.ap-southeast-1.amazonaws.com/kabarify/places/place_512d8e500313e65a4059cda9113642c81bc0f001.jpg",
+      "imageSource": "google_internal",
+      "dataSource": "geoapify"
+    }
+  ]
+}
+```
+
+#### **Penjelasan Field Response**:
+| Field | Tipe Data | Deskripsi |
+| :--- | :--- | :--- |
+| `id` | `string` | Unique ID tempat bisnis dari provider |
+| `name` | `string` | Nama resmi tempat bisnis |
+| `address` | `string` | Alamat fisik lengkap bisnis |
+| `latitude` | `number` | Koordinat Latitude lokasi bisnis |
+| `longitude` | `number` | Koordinat Longitude lokasi bisnis |
+| `categories` | `string[]` | Daftar kategori/jenis tempat bisnis |
+| `imageUrl` | `string` | URL foto gedung bisnis asli yang **tersimpan di AWS S3 internal** |
+| `imageSource` | `string` | Sumber foto (`google_internal`, `wikimedia`, `foursquare`, `geoapify_map`) |
+| `dataSource` | `string` | Provider data lokasi utama (`geoapify` / `google_places`) |
+

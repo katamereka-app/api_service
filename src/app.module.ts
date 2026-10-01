@@ -16,6 +16,7 @@ import { Place } from './provider/entities/place.entity.js';
 import { BusinessClaim } from './business-claims/entities/business-claim.entity.js';
 import { Review } from './reviews/entities/review.entity.js';
 import { ReviewReply } from './reviews/entities/review-reply.entity.js';
+import { ReviewHelpful } from './reviews/entities/review-helpful.entity.js';
 import { ReviewReport } from './review-reports/entities/review-report.entity.js';
 import { CmsContent } from './cms/entities/cms-content.entity.js';
 import { ContentSeo } from './cms/entities/content-seo.entity.js';
@@ -62,6 +63,7 @@ import { CustomerLogsModule } from './customer-logs/customer-logs.module.js';
           BusinessClaim,
           Review,
           ReviewReply,
+          ReviewHelpful,
           ReviewReport,
           CmsContent,
           ContentSeo,

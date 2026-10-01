@@ -6,6 +6,6 @@ export interface BusinessPlaceResult {
   longitude: number;
   categories: string[];
   imageUrl: string | null;
-  imageSource: 'wikimedia' | 'google' | 'none';
+  imageSource: 'wikimedia' | 'google' | 'google_internal' | 'foursquare' | 'geoapify_map' | 'none';
   dataSource: 'geoapify' | 'google_places';
 }

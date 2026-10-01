@@ -150,6 +150,14 @@ export class UsersService {
     const totalReviews = await this.reviewRepository.count({ where: { userId } });
     const totalSavedBusinesses = await this.favoriteRepository.count({ where: { userId } });
 
+    const helpfulSumResult = await this.reviewRepository
+      .createQueryBuilder('review')
+      .select('SUM(review.helpfulCount)', 'total')
+      .where('review.userId = :userId', { userId })
+      .getRawOne();
+
+    const totalHelpfulVotes = parseInt(helpfulSumResult?.total || '0', 10);
+
     return {
       success: true,
       message: 'Berhasil mengambil ringkasan profil customer',
@@ -163,7 +171,7 @@ export class UsersService {
         },
         stats: {
           totalReviews,
-          totalHelpfulVotes: 0,
+          totalHelpfulVotes,
           totalSavedBusinesses,
         },
       },

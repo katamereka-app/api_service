@@ -69,4 +69,10 @@ export class ReviewsController {
   async deleteReview(@Request() req: any, @Param('id') id: string) {
     return this.reviewsService.deleteReview(req.user.id, id);
   }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('reviews/:id/helpful')
+  async toggleHelpful(@Request() req: any, @Param('id') id: string) {
+    return this.reviewsService.toggleHelpful(req.user.id, id);
+  }
 }

@@ -9,12 +9,21 @@ import { PlacesController } from './places.controller.js';
 
 import { BusinessPlacesService } from './business-places.service.js';
 import { BusinessPlacesController } from './business-places.controller.js';
+import { StorageService } from '../businesses/storage/storage.service.js';
+import { S3StorageService } from '../businesses/storage/s3-storage.service.js';
 
 @Module({
   imports: [ConfigModule, TypeOrmModule.forFeature([Place, Business])],
   controllers: [PlacesController, BusinessPlacesController],
-  providers: [ProviderService, PlacesService, BusinessPlacesService],
+  providers: [
+    ProviderService,
+    PlacesService,
+    BusinessPlacesService,
+    {
+      provide: StorageService,
+      useClass: S3StorageService,
+    },
+  ],
   exports: [ProviderService, PlacesService, BusinessPlacesService, TypeOrmModule],
 })
 export class ProviderModule {}
-

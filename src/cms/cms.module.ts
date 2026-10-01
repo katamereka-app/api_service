@@ -11,7 +11,7 @@ import { CmsService } from './cms.service.js';
 import { AdminCmsController } from './admin-cms.controller.js';
 import { PublicCmsController } from './public-cms.controller.js';
 import { StorageService } from '../businesses/storage/storage.service.js';
-import { LocalStorageService } from '../businesses/storage/local-storage.service.js';
+import { S3StorageService } from '../businesses/storage/s3-storage.service.js';
 
 @Module({
   imports: [
@@ -30,7 +30,7 @@ import { LocalStorageService } from '../businesses/storage/local-storage.service
     CmsService,
     {
       provide: StorageService,
-      useClass: LocalStorageService,
+      useClass: S3StorageService,
     },
   ],
   exports: [CmsService, TypeOrmModule],
