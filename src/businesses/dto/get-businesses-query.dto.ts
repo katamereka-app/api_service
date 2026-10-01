@@ -19,6 +19,14 @@ export class GetBusinessesQueryDto {
   category?: string;
 
   @IsOptional()
+  @IsString()
+  sort?: string;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

@@ -36,7 +36,7 @@ export class BusinessesService {
     private readonly providerService: ProviderService,
     private readonly storageService: StorageService,
     private readonly customerLogsService: CustomerLogsService,
-  ) {}
+  ) { }
 
   /**
    * Notifies Google (via its documented sitemap ping endpoint) that
@@ -225,7 +225,14 @@ export class BusinessesService {
       queryBuilder.andWhere('b.category ILIKE :category', { category: `%${query.category}%` });
     }
 
-    queryBuilder.orderBy('b.createdAt', 'DESC');
+    const sortOpt = (query.sort || query.sortBy || '').toLowerCase();
+    if (sortOpt === 'popular') {
+      queryBuilder.orderBy('COALESCE(b.averageRating, b.externalRating, 0)', 'DESC');
+      queryBuilder.addOrderBy('COALESCE(b.reviewCount, b.externalReviewsCount, 0)', 'DESC');
+    } else {
+      queryBuilder.orderBy('b.createdAt', 'DESC');
+    }
+
     queryBuilder.skip(skip).take(limit);
 
     const [items, total] = await queryBuilder.getManyAndCount();
@@ -240,8 +247,11 @@ export class BusinessesService {
         city: b.city,
         province: b.province,
         category: b.category,
-        rating: b.externalRating,
-        reviews_count: b.externalReviewsCount,
+        rating: b.averageRating ? Number(b.averageRating) : (b.externalRating ? Number(b.externalRating) : 0),
+        reviews_count: (b.reviewCount && b.reviewCount > 0) ? b.reviewCount : (b.externalReviewsCount ?? 0),
+        logo_url: b.logoUrl,
+        cover_url: b.coverUrl,
+        photos: b.photos || [],
         status: b.status,
         updated_at: b.updatedAt,
       })),
@@ -359,6 +369,7 @@ export class BusinessesService {
         reviews_count: (b.reviewCount && b.reviewCount > 0) ? b.reviewCount : (b.externalReviewsCount ?? 0),
         logo_url: b.logoUrl,
         cover_url: b.coverUrl,
+        photos: b.photos || [],
         is_claimed: b.isClaimed,
         status: b.status,
       })),
@@ -479,7 +490,7 @@ export class BusinessesService {
     business = await this.ensureBusinessPhotos(business);
 
     if (currentUserId) {
-      this.recordBusinessView(currentUserId, id).catch(() => {});
+      this.recordBusinessView(currentUserId, id).catch(() => { });
     }
 
     const members = await this.memberRepository.find({
