@@ -99,6 +99,9 @@ export class Business {
   @Column({ type: 'text', nullable: true, name: 'cover_url' })
   coverUrl: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'fsq_id' })
+  fsqId: string | null;
+
   // Gallery image URLs, distinct from logo_url/cover_url — backs the
   // profile page's "Foto" tab.
   @Column({ type: 'jsonb', nullable: true })
