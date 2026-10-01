@@ -44,4 +44,17 @@ export class LocalStorageService implements StorageService {
       console.error('Error deleting local file:', err);
     }
   }
+
+  async fileExists(filename: string, folder: string): Promise<boolean> {
+    const filePath = path.join(process.cwd(), 'uploads', folder, filename);
+    return fs.existsSync(filePath);
+  }
+
+  async getExistingFileUrl(filename: string, folder: string): Promise<string | null> {
+    const exists = await this.fileExists(filename, folder);
+    if (exists) {
+      return `/uploads/${folder}/${filename}`;
+    }
+    return null;
+  }
 }

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import 'multer';
 import { StorageService } from './storage.service.js';
 
@@ -74,5 +74,29 @@ export class S3StorageService implements StorageService {
     } catch (err) {
       this.logger.error(`Error deleting file from S3: ${fileUrl}`, err);
     }
+  }
+
+  async fileExists(filename: string, folder: string): Promise<boolean> {
+    const key = `${this.keyPrefix}/${folder}/${filename}`;
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }),
+      );
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async getExistingFileUrl(filename: string, folder: string): Promise<string | null> {
+    const exists = await this.fileExists(filename, folder);
+    if (exists) {
+      const key = `${this.keyPrefix}/${folder}/${filename}`;
+      return `${this.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+    }
+    return null;
   }
 }

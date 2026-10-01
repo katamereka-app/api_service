@@ -447,11 +447,36 @@ export class BusinessesService {
     }));
   }
 
+  private async ensureBusinessPhotos(business: Business): Promise<Business> {
+    if ((business.photos && business.photos.length > 0) && business.coverUrl) {
+      return business;
+    }
+
+    try {
+      const cleanId = (business.externalId || business.id).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+      const filename = `place_${cleanId}.jpg`;
+      const existingS3Url = await this.storageService.getExistingFileUrl(filename, 'places');
+
+      if (existingS3Url) {
+        business.coverUrl = business.coverUrl || existingS3Url;
+        business.logoUrl = business.logoUrl || existingS3Url;
+        business.photos = business.photos && business.photos.length > 0 ? business.photos : [existingS3Url];
+        return await this.businessRepository.save(business);
+      }
+    } catch (err) {
+      this.logger.error(`Gagal auto-sync photo S3 untuk bisnis ${business.id}:`, err);
+    }
+
+    return business;
+  }
+
   async findOne(id: string, currentUserId?: string) {
-    const business = await this.businessRepository.findOne({ where: { id } });
+    let business = await this.businessRepository.findOne({ where: { id } });
     if (!business) {
       throw new NotFoundException('Bisnis tidak ditemukan');
     }
+
+    business = await this.ensureBusinessPhotos(business);
 
     if (currentUserId) {
       this.recordBusinessView(currentUserId, id).catch(() => {});
@@ -494,10 +519,12 @@ export class BusinessesService {
   }
 
   async findBySlug(slug: string, currentUserId?: string) {
-    const business = await this.businessRepository.findOne({ where: { slug } });
+    let business = await this.businessRepository.findOne({ where: { slug } });
     if (!business) {
       throw new NotFoundException('Bisnis dengan slug ini tidak ditemukan');
     }
+
+    business = await this.ensureBusinessPhotos(business);
 
     const members = await this.memberRepository.find({
       where: { businessId: business.id },

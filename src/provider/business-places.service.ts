@@ -67,43 +67,54 @@ export class BusinessPlacesService {
             let imageUrl: string | null = null;
             let imageSource: 'wikimedia' | 'google' | 'google_internal' | 'foursquare' | 'geoapify_map' | 'none' = 'none';
 
-            // 1.a & 1.b Cek field properties.wiki_and_media.wikimedia_commons atau wikidata
-            const wikiMedia = props.wiki_and_media || props.details?.wiki_and_media;
-            if (wikiMedia) {
-              if (wikiMedia.wikimedia_commons) {
-                imageUrl = await this.resolveWikimediaCommonsUrl(wikiMedia.wikimedia_commons);
-                if (imageUrl) imageSource = 'wikimedia';
-              } else if (wikiMedia.wikidata) {
-                imageUrl = await this.resolveWikidataClaimsUrl(wikiMedia.wikidata);
-                if (imageUrl) imageSource = 'wikimedia';
-              }
-            }
+            // 0. SINKRONISASI SMART S3 CACHE: Cek apakah gambar untuk tempat ini sudah tersinkronisasi di S3
+            const cleanId = id.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+            const filename = `place_${cleanId}.jpg`;
+            const existingS3Url = await this.storageService.getExistingFileUrl(filename, 'places');
 
-            // 2. FALLBACK GAMBAR (Foursquare Places API - Gratis & Real Photo)
-            const fsqApiKey = this.configService.get<string>('FOURSQUARE_API_KEY');
-            if (!imageUrl && fsqApiKey) {
-              const fsqPhotoUrl = await this.fetchFoursquarePhotoUrl(name, lat, lon, fsqApiKey);
-              if (fsqPhotoUrl) {
-                imageUrl = fsqPhotoUrl;
-                imageSource = 'foursquare';
+            if (existingS3Url) {
+              this.logger.log(`[Cache Hit S3] Gambar untuk "${name}" (ID: ${id}) sudah tersinkronisasi di S3. Skip API Eksternal.`);
+              imageUrl = existingS3Url;
+              imageSource = 'google_internal';
+            } else {
+              // 1.a & 1.b Cek field properties.wiki_and_media.wikimedia_commons atau wikidata
+              const wikiMedia = props.wiki_and_media || props.details?.wiki_and_media;
+              if (wikiMedia) {
+                if (wikiMedia.wikimedia_commons) {
+                  imageUrl = await this.resolveWikimediaCommonsUrl(wikiMedia.wikimedia_commons);
+                  if (imageUrl) imageSource = 'wikimedia';
+                } else if (wikiMedia.wikidata) {
+                  imageUrl = await this.resolveWikidataClaimsUrl(wikiMedia.wikidata);
+                  if (imageUrl) imageSource = 'wikimedia';
+                }
               }
-            }
 
-            // 3. FALLBACK GAMBAR (Google Places API / Google Cloud) -> AUTO SAVE TO INTERNAL STORAGE
-            if (!imageUrl && googleApiKey) {
-              this.logger.log(`[Fallback Gambar Google] Seeking Google Places Photo for "${name}" at (${lat}, ${lon})`);
-              const googlePhotoUrl = await this.fetchGooglePhotoUrl(name, lat, lon, googleApiKey);
-              if (googlePhotoUrl) {
-                // Auto Upload / Save buffer to Internal Storage (S3 / Local Storage)
-                imageUrl = await this.savePhotoToInternalStorage(googlePhotoUrl, id);
-                imageSource = 'google_internal';
+              // 2. FALLBACK GAMBAR (Foursquare Places API - Gratis & Real Photo)
+              const fsqApiKey = this.configService.get<string>('FOURSQUARE_API_KEY');
+              if (!imageUrl && fsqApiKey) {
+                const fsqPhotoUrl = await this.fetchFoursquarePhotoUrl(name, lat, lon, fsqApiKey);
+                if (fsqPhotoUrl) {
+                  imageUrl = fsqPhotoUrl;
+                  imageSource = 'foursquare';
+                }
               }
-            }
 
-            // 4. FALLBACK GAMBAR ASLI GEOAPIFY (Geoapify Static Location Map Photo)
-            if (!imageUrl && geoapifyApiKey && lat && lon) {
-              imageUrl = `https://maps.geoapify.com/v1/staticmap?style=osm-bright-smooth&width=600&height=400&center=lonlat:${lon},${lat}&zoom=16&marker=lonlat:${lon},${lat};color:%23ff2b2b;size:medium&apiKey=${geoapifyApiKey}`;
-              imageSource = 'geoapify_map';
+              // 3. FALLBACK GAMBAR (Google Places API / Google Cloud) -> AUTO SAVE TO INTERNAL STORAGE
+              if (!imageUrl && googleApiKey) {
+                this.logger.log(`[Sync Gambar Google] Seeking Google Places Photo for "${name}" at (${lat}, ${lon})`);
+                const googlePhotoUrl = await this.fetchGooglePhotoUrl(name, lat, lon, googleApiKey);
+                if (googlePhotoUrl) {
+                  // Auto Upload / Save buffer to Internal Storage (S3 / Local Storage)
+                  imageUrl = await this.savePhotoToInternalStorage(googlePhotoUrl, id);
+                  imageSource = 'google_internal';
+                }
+              }
+
+              // 4. FALLBACK GAMBAR ASLI GEOAPIFY (Geoapify Static Location Map Photo)
+              if (!imageUrl && geoapifyApiKey && lat && lon) {
+                imageUrl = `https://maps.geoapify.com/v1/staticmap?style=osm-bright-smooth&width=600&height=400&center=lonlat:${lon},${lat}&zoom=16&marker=lonlat:${lon},${lat};color:%23ff2b2b;size:medium&apiKey=${geoapifyApiKey}`;
+                imageSource = 'geoapify_map';
+              }
             }
 
             results.push({
