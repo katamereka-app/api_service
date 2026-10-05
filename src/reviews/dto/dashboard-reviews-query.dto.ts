@@ -64,4 +64,15 @@ export class DashboardReviewsQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   reported?: boolean;
+
+  // Date range filter: 7d, 30d, 3m, 1y, all
+  @IsOptional()
+  @IsString()
+  range?: string;
+
+  // When true, filters reviews needing attention: reply.id IS NULL OR rating <= 2 OR reported PENDING
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  needs_attention?: boolean;
 }

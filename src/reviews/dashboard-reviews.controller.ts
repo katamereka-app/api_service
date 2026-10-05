@@ -24,6 +24,22 @@ import { BusinessRole } from '../businesses/entities/business-member.entity.js';
 export class DashboardReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
+  @Get('dashboard/overview')
+  async getDashboardOverview(
+    @Param('businessId') businessId: string,
+    @Query('range') range?: string,
+  ) {
+    return this.reviewsService.getDashboardOverview(businessId, range);
+  }
+
+  @Get('dashboard/rating-trend')
+  async getRatingTrend(
+    @Param('businessId') businessId: string,
+    @Query('range') range?: string,
+  ) {
+    return this.reviewsService.getRatingTrend(businessId, range);
+  }
+
   @Get('dashboard/reviews')
   async getDashboardReviews(
     @Param('businessId') businessId: string,

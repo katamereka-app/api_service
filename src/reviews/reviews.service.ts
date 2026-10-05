@@ -21,6 +21,7 @@ import { GetReviewsQueryDto, ReviewSortOption } from './dto/get-reviews-query.dt
 import { DashboardReviewsQueryDto, ReplyStatusFilter } from './dto/dashboard-reviews-query.dto.js';
 import { CreateReviewReplyDto } from './dto/create-review-reply.dto.js';
 import { UpdateReviewReplyDto } from './dto/update-review-reply.dto.js';
+import { resolveRange, formatWibIso } from '../common/helpers/date-range.helper.js';
 
 @Injectable()
 export class ReviewsService {
@@ -177,20 +178,29 @@ export class ReviewsService {
     };
   }
 
-  async getReviewSummary(businessId: string) {
+  async getReviewSummary(businessId: string, range?: string) {
     const business = await this.businessRepository.findOne({ where: { id: businessId } });
     if (!business) {
       throw new NotFoundException('Bisnis tidak ditemukan');
     }
 
-    const distResult = await this.reviewRepository
+    const rangeRes = resolveRange(range);
+
+    const qb = this.reviewRepository
       .createQueryBuilder('review')
       .select('review.rating', 'rating')
       .addSelect('COUNT(review.id)', 'count')
       .where('review.businessId = :businessId', { businessId })
-      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
-      .groupBy('review.rating')
-      .getRawMany();
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED });
+
+    if (rangeRes.from && rangeRes.to) {
+      qb.andWhere('review.createdAt >= :from AND review.createdAt <= :to', {
+        from: rangeRes.from,
+        to: rangeRes.to,
+      });
+    }
+
+    const distResult = await qb.groupBy('review.rating').getRawMany();
 
     const distribution: Record<string, number> = {
       '5': 0,
@@ -219,6 +229,7 @@ export class ReviewsService {
       average_rating: avgRating,
       review_count: totalReviewCount,
       distribution,
+      ...(rangeRes.key !== 'all' ? { range: rangeRes.key } : {}),
     };
   }
 
@@ -395,6 +406,23 @@ export class ReviewsService {
         `EXISTS (SELECT 1 FROM review_reports rr WHERE rr.review_id = review.id AND rr.status = :reportedStatus)`,
         { reportedStatus: ReviewReportStatus.PENDING },
       );
+    }
+
+    if (query.needs_attention === true) {
+      queryBuilder.andWhere(
+        `(reply.id IS NULL OR review.rating <= 2 OR EXISTS (SELECT 1 FROM review_reports rr WHERE rr.review_id = review.id AND rr.status = :pendingReportStatus))`,
+        { pendingReportStatus: ReviewReportStatus.PENDING },
+      );
+    }
+
+    if (query.range && query.range !== 'all') {
+      const rangeRes = resolveRange(query.range);
+      if (rangeRes.from && rangeRes.to) {
+        queryBuilder.andWhere('review.createdAt >= :rangeFrom AND review.createdAt <= :rangeTo', {
+          rangeFrom: rangeRes.from,
+          rangeTo: rangeRes.to,
+        });
+      }
     }
 
     switch (query.sort) {
@@ -625,6 +653,318 @@ export class ReviewsService {
         helpfulCount: review.helpfulCount,
       };
     }
+  }
+
+  async getDashboardOverview(businessId: string, rangeStr?: string) {
+    const business = await this.businessRepository.findOne({ where: { id: businessId } });
+    if (!business) {
+      throw new NotFoundException('Bisnis tidak ditemukan');
+    }
+
+    const rangeRes = resolveRange(rangeStr || '30d');
+    const isAll = rangeRes.key === 'all';
+
+    // 1. AVERAGE RATING & RATING DISTRIBUTION in current period
+    const currentDistQb = this.reviewRepository
+      .createQueryBuilder('review')
+      .select('review.rating', 'rating')
+      .addSelect('COUNT(review.id)', 'count')
+      .where('review.businessId = :businessId', { businessId })
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED });
+
+    if (!isAll && rangeRes.from && rangeRes.to) {
+      currentDistQb.andWhere('review.createdAt >= :from AND review.createdAt <= :to', {
+        from: rangeRes.from,
+        to: rangeRes.to,
+      });
+    }
+
+    const currentDist = await currentDistQb.groupBy('review.rating').getRawMany();
+
+    const ratingDistribution: Record<string, number> = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
+    let currentPeriodReviewCount = 0;
+    let currentPeriodSumRating = 0;
+
+    for (const row of currentDist) {
+      const r = row.rating?.toString();
+      const cnt = parseInt(row.count, 10);
+      if (ratingDistribution[r] !== undefined) {
+        ratingDistribution[r] = cnt;
+      }
+      currentPeriodReviewCount += cnt;
+      currentPeriodSumRating += parseInt(row.rating, 10) * cnt;
+    }
+
+    const currentAvgRating = currentPeriodReviewCount > 0
+      ? parseFloat((currentPeriodSumRating / currentPeriodReviewCount).toFixed(1))
+      : 0;
+
+    // Previous period average rating
+    let prevAvgRating: number | null = null;
+    let deltaRating: number | null = null;
+
+    if (!isAll && rangeRes.prevFrom && rangeRes.prevTo) {
+      const prevDist = await this.reviewRepository
+        .createQueryBuilder('review')
+        .select('review.rating', 'rating')
+        .addSelect('COUNT(review.id)', 'count')
+        .where('review.businessId = :businessId', { businessId })
+        .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+        .andWhere('review.createdAt >= :prevFrom AND review.createdAt <= :prevTo', {
+          prevFrom: rangeRes.prevFrom,
+          prevTo: rangeRes.prevTo,
+        })
+        .groupBy('review.rating')
+        .getRawMany();
+
+      let prevCount = 0;
+      let prevSum = 0;
+      for (const row of prevDist) {
+        const cnt = parseInt(row.count, 10);
+        prevCount += cnt;
+        prevSum += parseInt(row.rating, 10) * cnt;
+      }
+      prevAvgRating = prevCount > 0 ? parseFloat((prevSum / prevCount).toFixed(1)) : 0;
+      deltaRating = parseFloat((currentAvgRating - prevAvgRating).toFixed(1));
+    }
+
+    // 2. TOTAL REVIEWS (Cumulative count)
+    const totalCurrentQb = this.reviewRepository
+      .createQueryBuilder('review')
+      .where('review.businessId = :businessId', { businessId })
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED });
+
+    if (!isAll && rangeRes.to) {
+      totalCurrentQb.andWhere('review.createdAt <= :to', { to: rangeRes.to });
+    }
+    const totalReviewsValue = await totalCurrentQb.getCount();
+
+    let totalReviewsPrevious: number | null = null;
+    let totalReviewsDeltaPct: number | null = null;
+
+    if (!isAll && rangeRes.prevTo) {
+      totalReviewsPrevious = await this.reviewRepository
+        .createQueryBuilder('review')
+        .where('review.businessId = :businessId', { businessId })
+        .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+        .andWhere('review.createdAt <= :prevTo', { prevTo: rangeRes.prevTo })
+        .getCount();
+
+      if (totalReviewsPrevious > 0) {
+        totalReviewsDeltaPct = Math.round(((totalReviewsValue - totalReviewsPrevious) / totalReviewsPrevious) * 100);
+      } else {
+        totalReviewsDeltaPct = totalReviewsValue > 0 ? 100 : 0;
+      }
+    }
+
+    // 3. NEW REVIEWS (Count created in period)
+    const newReviewsValue = currentPeriodReviewCount;
+    let newReviewsPrevious: number | null = null;
+    let newReviewsDeltaPct: number | null = null;
+
+    if (!isAll && rangeRes.prevFrom && rangeRes.prevTo) {
+      newReviewsPrevious = await this.reviewRepository
+        .createQueryBuilder('review')
+        .where('review.businessId = :businessId', { businessId })
+        .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+        .andWhere('review.createdAt >= :prevFrom AND review.createdAt <= :prevTo', {
+          prevFrom: rangeRes.prevFrom,
+          prevTo: rangeRes.prevTo,
+        })
+        .getCount();
+
+      if (newReviewsPrevious > 0) {
+        newReviewsDeltaPct = Math.round(((newReviewsValue - newReviewsPrevious) / newReviewsPrevious) * 100);
+      } else {
+        newReviewsDeltaPct = newReviewsValue > 0 ? 100 : 0;
+      }
+    }
+
+    // 4. RESPONSE RATE (% of reviews created in period that have a reply)
+    const repliedInPeriodQb = this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoin('review.reply', 'reply')
+      .where('review.businessId = :businessId', { businessId })
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED });
+
+    if (!isAll && rangeRes.from && rangeRes.to) {
+      repliedInPeriodQb.andWhere('review.createdAt >= :from AND review.createdAt <= :to', {
+        from: rangeRes.from,
+        to: rangeRes.to,
+      });
+    }
+
+    const repliedInPeriodCount = await repliedInPeriodQb.getCount();
+    const responseRateValue = currentPeriodReviewCount > 0
+      ? Math.round((repliedInPeriodCount / currentPeriodReviewCount) * 100)
+      : 0;
+
+    let responseRatePrevious: number | null = null;
+    let responseRateDelta: number | null = null;
+
+    if (!isAll && rangeRes.prevFrom && rangeRes.prevTo) {
+      const prevTotalCreated = newReviewsPrevious || 0;
+      const prevReplied = await this.reviewRepository
+        .createQueryBuilder('review')
+        .innerJoin('review.reply', 'reply')
+        .where('review.businessId = :businessId', { businessId })
+        .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+        .andWhere('review.createdAt >= :prevFrom AND review.createdAt <= :prevTo', {
+          prevFrom: rangeRes.prevFrom,
+          prevTo: rangeRes.prevTo,
+        })
+        .getCount();
+
+      responseRatePrevious = prevTotalCreated > 0
+        ? Math.round((prevReplied / prevTotalCreated) * 100)
+        : 0;
+      responseRateDelta = responseRateValue - responseRatePrevious;
+    }
+
+    // 5. REVIEW STATUS (replied, unreplied, reported based on cumulative total_reviews)
+    const cumulativeRepliedQb = this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoin('review.reply', 'reply')
+      .where('review.businessId = :businessId', { businessId })
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED });
+
+    if (!isAll && rangeRes.to) {
+      cumulativeRepliedQb.andWhere('review.createdAt <= :to', { to: rangeRes.to });
+    }
+    const statusRepliedCount = await cumulativeRepliedQb.getCount();
+    const statusUnrepliedCount = Math.max(0, totalReviewsValue - statusRepliedCount);
+
+    const statusReportedQb = this.reviewRepository
+      .createQueryBuilder('review')
+      .where('review.businessId = :businessId', { businessId })
+      .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+      .andWhere(
+        `EXISTS (SELECT 1 FROM review_reports rr WHERE rr.review_id = review.id AND rr.status = :reportedStatus)`,
+        { reportedStatus: ReviewReportStatus.PENDING },
+      );
+
+    if (!isAll && rangeRes.to) {
+      statusReportedQb.andWhere('review.createdAt <= :to', { to: rangeRes.to });
+    }
+    const statusReportedCount = await statusReportedQb.getCount();
+
+    return {
+      range: {
+        key: rangeRes.key,
+        from: rangeRes.fromIso,
+        to: rangeRes.toIso,
+      },
+      stats: {
+        average_rating: {
+          value: currentAvgRating,
+          previous: prevAvgRating,
+          delta: deltaRating,
+        },
+        total_reviews: {
+          value: totalReviewsValue,
+          previous: totalReviewsPrevious,
+          delta_pct: totalReviewsDeltaPct,
+        },
+        new_reviews: {
+          value: newReviewsValue,
+          previous: newReviewsPrevious,
+          delta_pct: newReviewsDeltaPct,
+        },
+        response_rate: {
+          value: responseRateValue,
+          previous: responseRatePrevious,
+          delta: responseRateDelta,
+        },
+      },
+      rating_distribution: ratingDistribution,
+      review_status: {
+        replied: statusRepliedCount,
+        unreplied: statusUnrepliedCount,
+        reported: statusReportedCount,
+      },
+    };
+  }
+
+  async getRatingTrend(businessId: string, rangeStr?: string) {
+    const business = await this.businessRepository.findOne({ where: { id: businessId } });
+    if (!business) {
+      throw new NotFoundException('Bisnis tidak ditemukan');
+    }
+
+    const rangeRes = resolveRange(rangeStr || '30d');
+
+    let bucket: 'day' | 'week' | 'month' = 'week';
+    if (rangeRes.key === '7d') bucket = 'day';
+    else if (rangeRes.key === '30d' || rangeRes.key === '3m') bucket = 'week';
+    else bucket = 'month';
+
+    const points: Array<{ start: string; average_rating: number | null; review_count: number }> = [];
+
+    const now = rangeRes.to || new Date();
+    const intervals: Array<{ start: Date; end: Date }> = [];
+
+    if (bucket === 'day') {
+      const from = rangeRes.from || new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+      for (let i = 0; i < 7; i++) {
+        const start = new Date(from.getTime() + i * 24 * 60 * 60 * 1000);
+        const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+        intervals.push({ start, end });
+      }
+    } else if (bucket === 'week') {
+      const weeksCount = rangeRes.key === '3m' ? 13 : 5;
+      const from = rangeRes.from || new Date(now.getTime() - (weeksCount * 7 - 1) * 24 * 60 * 60 * 1000);
+      for (let i = 0; i < weeksCount; i++) {
+        const start = new Date(from.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+        const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+        intervals.push({ start, end });
+      }
+    } else {
+      const monthsCount = 12;
+      const wibNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+      const curYear = wibNow.getUTCFullYear();
+      const curMonth = wibNow.getUTCMonth();
+
+      for (let i = monthsCount - 1; i >= 0; i--) {
+        const targetMonth = (curMonth - i + 1200) % 12;
+        const targetYear = curYear - Math.floor((11 - (curMonth - i + 1200) % 12) / 12);
+
+        const start = new Date(Date.UTC(targetYear, targetMonth, 1, -7, 0, 0, 0));
+        const end = new Date(Date.UTC(targetYear, targetMonth + 1, 1, -7, 0, 0, -1));
+        intervals.push({ start, end });
+      }
+    }
+
+    for (const interval of intervals) {
+      const rawRes = await this.reviewRepository
+        .createQueryBuilder('review')
+        .select('COUNT(review.id)', 'count')
+        .addSelect('SUM(review.rating)', 'sum')
+        .where('review.businessId = :businessId', { businessId })
+        .andWhere('review.status = :status', { status: ReviewStatus.PUBLISHED })
+        .andWhere('review.createdAt >= :start AND review.createdAt <= :end', {
+          start: interval.start,
+          end: interval.end,
+        })
+        .getRawOne();
+
+      const cnt = parseInt(rawRes?.count || '0', 10);
+      const sum = parseFloat(rawRes?.sum || '0');
+      const avg = cnt > 0 ? parseFloat((sum / cnt).toFixed(1)) : null;
+
+      const wibStart = new Date(interval.start.getTime() + 7 * 60 * 60 * 1000);
+      const dateStr = wibStart.toISOString().split('T')[0];
+
+      points.push({
+        start: dateStr,
+        average_rating: avg,
+        review_count: cnt,
+      });
+    }
+
+    return {
+      bucket,
+      points,
+    };
   }
 }
 

@@ -32,6 +32,7 @@ export enum ReviewSource {
 @Entity('reviews')
 @Unique(['userId', 'businessId'])
 @Index(['businessId', 'status'])
+@Index(['businessId', 'createdAt'])
 @Index(['userId'])
 @Index(['rating'])
 @Index(['createdAt'])

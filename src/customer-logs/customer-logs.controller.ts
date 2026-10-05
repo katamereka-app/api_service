@@ -2,6 +2,9 @@ import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CustomerLogsService } from './customer-logs.service.js';
 
+import { PlatformRoleGuard, PlatformRoles } from '../business-claims/guards/platform-role.guard.js';
+import { PlatformRole } from '../users/entities/user.entity.js';
+
 @Controller('customer-logs')
 export class CustomerLogsController {
   constructor(private readonly customerLogsService: CustomerLogsService) {}
@@ -20,7 +23,8 @@ export class CustomerLogsController {
     };
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), PlatformRoleGuard)
+  @PlatformRoles(PlatformRole.SUPER_ADMIN)
   @Get()
   async getAllLogs(@Query('limit') limit?: number) {
     const logs = await this.customerLogsService.getAllLogs(limit ? Number(limit) : 100);

@@ -11,6 +11,8 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
+  Headers,
+  UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
 import 'multer';
@@ -38,7 +40,14 @@ export class BusinessesController {
   constructor(private readonly businessesService: BusinessesService) {}
 
   @Post('internal/businesses/sync')
-  async syncInternal(@Body() dto: SyncBusinessesDto) {
+  async syncInternal(
+    @Headers('x-internal-api-key') apiKey: string,
+    @Body() dto: SyncBusinessesDto,
+  ) {
+    const expectedKey = process.env.INTERNAL_API_KEY || 'internal-secret-key';
+    if (!apiKey || apiKey !== expectedKey) {
+      throw new UnauthorizedException('Akses ditolak: Internal API Key tidak valid');
+    }
     return this.businessesService.syncBusinesses(dto);
   }
 
@@ -219,13 +228,15 @@ export class BusinessesController {
     return this.businessesService.create(req.user.id, dto);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), BusinessMemberGuard, BusinessRoleGuard)
+  @BusinessRoles(BusinessRole.OWNER, BusinessRole.ADMIN)
   @Patch('businesses/:id')
   async update(@Param('id') id: string, @Body() dto: UpdateBusinessDto) {
     return this.businessesService.update(id, dto);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), BusinessMemberGuard, BusinessRoleGuard)
+  @BusinessRoles(BusinessRole.OWNER, BusinessRole.ADMIN)
   @Post('businesses/:id/members')
   async addMember(@Param('id') id: string, @Body() dto: AddBusinessMemberDto) {
     return this.businessesService.addMember(id, dto);

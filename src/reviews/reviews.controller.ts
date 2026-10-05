@@ -45,8 +45,11 @@ export class ReviewsController {
   }
 
   @Get('businesses/:businessId/review-summary')
-  async getReviewSummary(@Param('businessId') businessId: string) {
-    return this.reviewsService.getReviewSummary(businessId);
+  async getReviewSummary(
+    @Param('businessId') businessId: string,
+    @Query('range') range?: string,
+  ) {
+    return this.reviewsService.getReviewSummary(businessId, range);
   }
 
   @Get('reviews/:id')
