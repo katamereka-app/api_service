@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { BusinessPlaceResult } from './interfaces/business-place-result.interface.js';
 import { StorageService } from '../businesses/storage/storage.service.js';
+import { OperatingHoursService } from '../businesses/operating-hours.service.js';
+import { Business, BusinessStatus } from '../businesses/entities/business.entity.js';
+import { BusinessOperatingHours } from '../businesses/entities/business-operating-hours.entity.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -12,6 +17,11 @@ export class BusinessPlacesService {
   constructor(
     private readonly configService: ConfigService,
     private readonly storageService: StorageService,
+    private readonly operatingHoursService: OperatingHoursService,
+    @InjectRepository(Business)
+    private readonly businessRepository: Repository<Business>,
+    @InjectRepository(BusinessOperatingHours)
+    private readonly operatingHoursRepository: Repository<BusinessOperatingHours>,
   ) { }
 
   async searchBusinessPlaces(keyword: string, location: string, limit: number = 20): Promise<BusinessPlaceResult[]> {
@@ -117,6 +127,24 @@ export class BusinessPlacesService {
               }
             }
 
+            // Extract raw opening_hours string from Geoapify feature properties
+            const rawOpeningHours = props.opening_hours || props.datasource?.raw?.opening_hours || props.details?.opening_hours;
+            let operatingHours;
+
+            if (rawOpeningHours) {
+              operatingHours = this.operatingHoursService.parseAndCalculate(rawOpeningHours, 'geoapify_osm');
+            } else if (googleApiKey) {
+              // Fallback Otomatis: Fetch Opening Hours dari Google Places API (Place Details)
+              const googleDetails = await this.fetchGooglePlaceDetails(name, lat, lon, googleApiKey);
+              if (googleDetails.openingHours) {
+                operatingHours = this.operatingHoursService.parseGoogleOpeningHoursObject(googleDetails.openingHours);
+              } else {
+                operatingHours = this.operatingHoursService.parseAndCalculate(null, 'unknown');
+              }
+            } else {
+              operatingHours = this.operatingHoursService.parseAndCalculate(null, 'unknown');
+            }
+
             results.push({
               id,
               name,
@@ -127,9 +155,11 @@ export class BusinessPlacesService {
               imageUrl,
               imageSource,
               dataSource: 'geoapify',
+              operatingHours,
             });
           }
 
+          await this.autoPersistResultsToDb(results);
           return results;
         }
       }
@@ -139,7 +169,13 @@ export class BusinessPlacesService {
 
     // 3. TOTAL FAILOVER / FALLBACK PENUH (Google Places API)
     this.logger.log(`[Total Failover] Switched completely to Google Places API`);
-    return await this.fetchTotalFailoverGooglePlaces(keyword, location, limit, googleApiKey);
+    const googleResults = await this.fetchTotalFailoverGooglePlaces(keyword, location, limit, googleApiKey);
+    if (googleResults && googleResults.length > 0) {
+      return googleResults;
+    }
+
+    // 4. FALLBACK TERAKHIR (Database Lokal PostgreSQL saat Offline / Connection Error)
+    return await this.fallbackSearchLocalDatabase(keyword, location, limit);
   }
 
   // Resolusi Gambar via Wikimedia Commons API
@@ -232,6 +268,38 @@ export class BusinessPlacesService {
     return null;
   }
 
+  // Fetch Google Place Details for photo and opening hours
+  private async fetchGooglePlaceDetails(name: string, lat: number, lon: number, apiKey: string): Promise<{ photoUrl: string | null; openingHours: any | null }> {
+    try {
+      const searchUrl = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(name)}&inputtype=textquery&locationbias=point:${lat},${lon}&fields=photos,place_id&key=${apiKey}`;
+      const res = await fetch(searchUrl);
+      if (res.ok) {
+        const data = await res.json();
+        const candidate = data?.candidates?.[0];
+        if (candidate?.place_id) {
+          const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${candidate.place_id}&fields=photos,opening_hours&key=${apiKey}`;
+          const dRes = await fetch(detailsUrl);
+          if (dRes.ok) {
+            const dData = await dRes.json();
+            const result = dData?.result;
+            let photoUrl: string | null = null;
+            if (result?.photos && result.photos.length > 0) {
+              const photoRef = result.photos[0].photo_reference;
+              photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=500&photo_reference=${photoRef}&key=${apiKey}`;
+            }
+            return {
+              photoUrl,
+              openingHours: result?.opening_hours || null,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Gagal fetch Google Place Details for "${name}":`, err);
+    }
+    return { photoUrl: null, openingHours: null };
+  }
+
   // Auto-download external photo and save to internal S3 / MinIO storage
   private async savePhotoToInternalStorage(externalPhotoUrl: string, placeId: string): Promise<string> {
     try {
@@ -268,7 +336,7 @@ export class BusinessPlacesService {
         const data = await res.json();
         const results = data?.results || [];
 
-        return results.slice(0, limit).map((p: any) => {
+        const mappedResults: BusinessPlaceResult[] = results.slice(0, limit).map((p: any) => {
           let imageUrl: string | null = null;
           let imageSource: 'wikimedia' | 'google' | 'none' = 'none';
 
@@ -290,11 +358,108 @@ export class BusinessPlacesService {
             dataSource: 'google_places',
           };
         });
+
+        await this.autoPersistResultsToDb(mappedResults);
+        return mappedResults;
       }
     } catch (err) {
       this.logger.error('Google Places Total Failover error:', err);
     }
 
     return [];
+  }
+
+  private async autoPersistResultsToDb(results: BusinessPlaceResult[]): Promise<void> {
+    for (const item of results) {
+      try {
+        const cleanId = item.id.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+        let business = await this.businessRepository.findOne({ where: { externalId: item.id } });
+        
+        if (!business) {
+          const baseSlug = item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'place';
+          const slug = `${baseSlug}-${cleanId}`;
+
+          business = this.businessRepository.create({
+            externalId: item.id,
+            externalSource: item.dataSource || 'geoapify',
+            name: item.name,
+            slug,
+            address: item.address,
+            latitude: item.latitude,
+            longitude: item.longitude,
+            logoUrl: item.imageUrl || undefined,
+            status: BusinessStatus.ACTIVE,
+          });
+          business = await this.businessRepository.save(business);
+        }
+
+        if (item.operatingHours && business) {
+          let opRecord = await this.operatingHoursRepository.findOne({ where: { businessId: business.id } });
+          if (!opRecord) {
+            opRecord = this.operatingHoursRepository.create({
+              businessId: business.id,
+            });
+          }
+
+          opRecord.isOpen = item.operatingHours.isOpen;
+          opRecord.statusText = item.operatingHours.statusText;
+          opRecord.nextChangeText = item.operatingHours.nextChangeText;
+          opRecord.rawSchedule = item.operatingHours.rawSchedule;
+          opRecord.source = item.operatingHours.source || 'unknown';
+          opRecord.weeklySchedule = item.operatingHours.weeklySchedule;
+
+          await this.operatingHoursRepository.save(opRecord);
+        }
+      } catch (err) {
+        this.logger.error(`Gagal auto-persist bisnis "${item.name}" ke DB:`, err);
+      }
+    }
+  }
+
+  private async fallbackSearchLocalDatabase(keyword: string, location: string, limit: number): Promise<BusinessPlaceResult[]> {
+    this.logger.log(`[Offline / Database Fallback] Searching local database for keyword "${keyword}" in "${location}"`);
+    try {
+      const qb = this.businessRepository.createQueryBuilder('b')
+        .leftJoinAndSelect('b.operatingHoursDetail', 'oh')
+        .where('(b.name ILIKE :kw OR b.address ILIKE :kw)', { kw: `%${keyword}%` });
+
+      if (location) {
+        qb.andWhere('(b.address ILIKE :loc OR b.city ILIKE :loc)', { loc: `%${location}%` });
+      }
+
+      const businesses = await qb.take(limit).getMany();
+
+      return businesses.map((b) => {
+        let opHours;
+        if (b.operatingHoursDetail) {
+          opHours = {
+            isOpen: b.operatingHoursDetail.isOpen,
+            statusText: b.operatingHoursDetail.statusText || 'Jam Operasional Tidak Tersedia',
+            rawSchedule: b.operatingHoursDetail.rawSchedule,
+            source: b.operatingHoursDetail.source || 'unknown',
+            nextChangeText: b.operatingHoursDetail.nextChangeText,
+            weeklySchedule: b.operatingHoursDetail.weeklySchedule || [],
+          };
+        } else {
+          opHours = this.operatingHoursService.parseAndCalculate(null, 'unknown');
+        }
+
+        return {
+          id: b.externalId || b.id,
+          name: b.name,
+          address: b.address || '',
+          latitude: b.latitude || 0,
+          longitude: b.longitude || 0,
+          categories: [],
+          imageUrl: b.logoUrl || null,
+          imageSource: b.logoUrl ? 'google_internal' : 'none',
+          dataSource: 'google_places' as any,
+          operatingHours: opHours,
+        };
+      });
+    } catch (err) {
+      this.logger.error('Gagal fallback pencarian ke Database Lokal:', err);
+      return [];
+    }
   }
 }

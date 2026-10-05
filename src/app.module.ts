@@ -11,6 +11,7 @@ import { Business } from './businesses/entities/business.entity.js';
 import { BusinessMember } from './businesses/entities/business-member.entity.js';
 import { UserBusinessHistory } from './businesses/entities/user-business-history.entity.js';
 import { UserFavoriteBusiness } from './businesses/entities/user-favorite-business.entity.js';
+import { BusinessOperatingHours } from './businesses/entities/business-operating-hours.entity.js';
 import { CustomerLog } from './customer-logs/entities/customer-log.entity.js';
 import { Place } from './provider/entities/place.entity.js';
 import { BusinessClaim } from './business-claims/entities/business-claim.entity.js';
@@ -58,6 +59,7 @@ import { CustomerLogsModule } from './customer-logs/customer-logs.module.js';
           BusinessMember,
           UserBusinessHistory,
           UserFavoriteBusiness,
+          BusinessOperatingHours,
           CustomerLog,
           Place,
           BusinessClaim,

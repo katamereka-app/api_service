@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Unique } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Unique, OneToOne } from 'typeorm';
+import type { BusinessOperatingHours } from './business-operating-hours.entity.js';
 
 export enum BusinessStatus {
   PENDING = 'PENDING',
@@ -109,6 +110,9 @@ export class Business {
 
   @Column({ type: 'jsonb', nullable: true, name: 'opening_hours' })
   openingHours: Record<string, any> | null;
+
+  @OneToOne('BusinessOperatingHours', (oh: any) => oh.business)
+  operatingHoursDetail: BusinessOperatingHours | null;
 
   @Column({ type: 'jsonb', nullable: true })
   facilities: Record<string, any> | null;

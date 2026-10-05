@@ -20,6 +20,7 @@ import { BusinessesService } from './businesses.service.js';
 import { CreateBusinessDto, UpdateBusinessDto, AddBusinessMemberDto, SyncGoogleBusinessDto } from './dto/business.dto.js';
 import { SyncBusinessesDto } from './dto/sync-businesses.dto.js';
 import { GetBusinessesQueryDto } from './dto/get-businesses-query.dto.js';
+import { GetNearbyBusinessesQueryDto } from './dto/get-nearby-businesses-query.dto.js';
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto.js';
 import { BusinessMemberGuard } from '../business-claims/guards/business-member.guard.js';
 import { BusinessRoleGuard, BusinessRoles } from '../business-claims/guards/business-role.guard.js';
@@ -182,6 +183,11 @@ export class BusinessesController {
   @Get('businesses/popular')
   async getPopular(@Query('limit') limit?: number) {
     return this.businessesService.getPopularBusinesses(limit ? Number(limit) : 10);
+  }
+
+  @Get('businesses/nearby')
+  async getNearby(@Query() query: GetNearbyBusinessesQueryDto) {
+    return this.businessesService.getNearbyBusinesses(query);
   }
 
   // Data-retrieval endpoints for the FE's dynamic sitemap generator (and

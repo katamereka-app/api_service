@@ -1,3 +1,5 @@
+import type { OperatingHoursResult } from '../../businesses/operating-hours.service.js';
+
 export interface BusinessPlaceResult {
   id: string;
   name: string;
@@ -8,4 +10,5 @@ export interface BusinessPlaceResult {
   imageUrl: string | null;
   imageSource: 'wikimedia' | 'google' | 'google_internal' | 'foursquare' | 'geoapify_map' | 'none';
   dataSource: 'geoapify' | 'google_places';
+  operatingHours?: OperatingHoursResult;
 }

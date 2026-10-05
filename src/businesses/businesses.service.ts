@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import 'multer';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,10 +6,13 @@ import { Business, BusinessStatus } from './entities/business.entity.js';
 import { BusinessMember, BusinessRole } from './entities/business-member.entity.js';
 import { UserBusinessHistory } from './entities/user-business-history.entity.js';
 import { UserFavoriteBusiness } from './entities/user-favorite-business.entity.js';
+import { BusinessOperatingHours } from './entities/business-operating-hours.entity.js';
 import { User } from '../users/entities/user.entity.js';
+import { OperatingHoursService } from './operating-hours.service.js';
 import { CreateBusinessDto, UpdateBusinessDto, AddBusinessMemberDto, SyncGoogleBusinessDto } from './dto/business.dto.js';
 import { SyncBusinessesDto } from './dto/sync-businesses.dto.js';
 import { GetBusinessesQueryDto } from './dto/get-businesses-query.dto.js';
+import { GetNearbyBusinessesQueryDto } from './dto/get-nearby-businesses-query.dto.js';
 import { ProviderService } from '../provider/provider.service.js';
 import { NormalizedGeoapifyBusiness } from '../provider/interfaces/normalized-geoapify-business.interface.js';
 import { UpdateBusinessProfileDto } from './dto/update-business-profile.dto.js';
@@ -31,11 +34,14 @@ export class BusinessesService {
     private readonly historyRepository: Repository<UserBusinessHistory>,
     @InjectRepository(UserFavoriteBusiness)
     private readonly favoriteRepository: Repository<UserFavoriteBusiness>,
+    @InjectRepository(BusinessOperatingHours)
+    private readonly operatingHoursRepository: Repository<BusinessOperatingHours>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly providerService: ProviderService,
     private readonly storageService: StorageService,
     private readonly customerLogsService: CustomerLogsService,
+    private readonly operatingHoursService: OperatingHoursService,
   ) { }
 
   /**
@@ -376,6 +382,140 @@ export class BusinessesService {
     };
   }
 
+  async getNearbyBusinesses(query: GetNearbyBusinessesQueryDto) {
+    const limit = query.limit || 20;
+    const radius = query.radius || 5;
+
+    // 1. Apabila koordinat GPS (latitude & longitude) diberikan
+    if (query.latitude !== undefined && query.longitude !== undefined) {
+      const lat = Number(query.latitude);
+      const lon = Number(query.longitude);
+
+      const haversineFormula = `(
+        6371 * acos(
+          least(1.0, greatest(-1.0,
+            cos(radians(${lat})) * cos(radians(b.latitude)) *
+            cos(radians(b.longitude) - radians(${lon})) +
+            sin(radians(${lat})) * sin(radians(b.latitude))
+          ))
+        )
+      )`;
+
+      const qb = this.businessRepository
+        .createQueryBuilder('b')
+        .select([
+          'b.id AS id',
+          'b.name AS name',
+          'b.slug AS slug',
+          'b.address AS address',
+          'b.city AS city',
+          'b.province AS province',
+          'b.latitude AS latitude',
+          'b.longitude AS longitude',
+          'b.category AS category',
+          'b.averageRating AS average_rating',
+          'b.externalRating AS external_rating',
+          'b.reviewCount AS review_count',
+          'b.externalReviewsCount AS external_reviews_count',
+          'b.logoUrl AS logo_url',
+          'b.coverUrl AS cover_url',
+          'b.photos AS photos',
+          'b.isClaimed AS is_claimed',
+          'b.status AS status',
+          `${haversineFormula} AS distance_km`,
+        ])
+        .where('b.status IN (:...publicStatuses)', {
+          publicStatuses: [BusinessStatus.ACTIVE, BusinessStatus.CLAIMED],
+        })
+        .andWhere('b.latitude IS NOT NULL AND b.longitude IS NOT NULL')
+        .andWhere(`${haversineFormula} <= :radius`, { radius })
+        .orderBy('distance_km', 'ASC')
+        .limit(limit);
+
+      if (query.city) {
+        qb.andWhere('b.city ILIKE :city', { city: `%${query.city}%` });
+      }
+
+      const rawResults = await qb.getRawMany();
+
+      return {
+        success: true,
+        message: `Berhasil menemukan bisnis terdekat dalam radius ${radius} km`,
+        data: {
+          user_location: {
+            latitude: lat,
+            longitude: lon,
+            radius_km: radius,
+          },
+          total_found: rawResults.length,
+          businesses: rawResults.map((r) => ({
+            id: r.id,
+            name: r.name,
+            slug: r.slug,
+            address: r.address,
+            city: r.city,
+            province: r.province,
+            latitude: r.latitude ? Number(r.latitude) : null,
+            longitude: r.longitude ? Number(r.longitude) : null,
+            distance_km: r.distance_km ? Math.round(Number(r.distance_km) * 100) / 100 : 0,
+            category: r.category,
+            rating: r.average_rating ? Number(r.average_rating) : (r.external_rating ? Number(r.external_rating) : 0),
+            reviews_count: (r.review_count && r.review_count > 0) ? r.review_count : (r.external_reviews_count ?? 0),
+            logo_url: r.logo_url,
+            cover_url: r.cover_url,
+            photos: r.photos ? (typeof r.photos === 'string' ? JSON.parse(r.photos) : r.photos) : [],
+            is_claimed: r.is_claimed,
+            status: r.status,
+          })),
+        },
+      };
+    }
+
+    // 2. Fallback jika user hanya memilih Nama Kota tanpa GPS
+    if (query.city) {
+      const qb = this.businessRepository
+        .createQueryBuilder('b')
+        .where('b.status IN (:...publicStatuses)', {
+          publicStatuses: [BusinessStatus.ACTIVE, BusinessStatus.CLAIMED],
+        })
+        .andWhere('b.city ILIKE :city', { city: `%${query.city}%` })
+        .orderBy('COALESCE(b.averageRating, b.externalRating, 0)', 'DESC')
+        .take(limit);
+
+      const items = await qb.getMany();
+
+      return {
+        success: true,
+        message: `Berhasil menemukan bisnis di kota ${query.city}`,
+        data: {
+          city: query.city,
+          total_found: items.length,
+          businesses: items.map((b) => ({
+            id: b.id,
+            name: b.name,
+            slug: b.slug,
+            address: b.address,
+            city: b.city,
+            province: b.province,
+            latitude: b.latitude,
+            longitude: b.longitude,
+            distance_km: null,
+            category: b.category,
+            rating: b.averageRating ? Number(b.averageRating) : (b.externalRating ? Number(b.externalRating) : 0),
+            reviews_count: (b.reviewCount && b.reviewCount > 0) ? b.reviewCount : (b.externalReviewsCount ?? 0),
+            logo_url: b.logoUrl,
+            cover_url: b.coverUrl,
+            photos: b.photos || [],
+            is_claimed: b.isClaimed,
+            status: b.status,
+          })),
+        },
+      };
+    }
+
+    throw new BadRequestException('Wajib memberikan parameter latitude & longitude (GPS) atau nama city');
+  }
+
   async recordBusinessView(userId: string, businessId: string) {
     if (!userId || !businessId) return;
 
@@ -481,6 +621,42 @@ export class BusinessesService {
     return business;
   }
 
+  async enrichAndSaveOperatingHours(business: Business, rawOpeningHours?: string | null) {
+    let rawStr = rawOpeningHours;
+    if (!rawStr && business.openingHours) {
+      if (typeof business.openingHours === 'string') {
+        rawStr = business.openingHours;
+      } else if (typeof business.openingHours === 'object' && (business.openingHours as any).raw) {
+        rawStr = String((business.openingHours as any).raw);
+      }
+    }
+
+    const source = rawStr ? 'geoapify_osm' : 'unknown';
+    const parsed = this.operatingHoursService.parseAndCalculate(rawStr, source);
+
+    try {
+      let opRecord = await this.operatingHoursRepository.findOne({ where: { businessId: business.id } });
+      if (!opRecord) {
+        opRecord = this.operatingHoursRepository.create({
+          businessId: business.id,
+        });
+      }
+
+      opRecord.isOpen = parsed.isOpen;
+      opRecord.statusText = parsed.statusText;
+      opRecord.nextChangeText = parsed.nextChangeText;
+      opRecord.rawSchedule = parsed.rawSchedule;
+      opRecord.source = parsed.source;
+      opRecord.weeklySchedule = parsed.weeklySchedule;
+
+      await this.operatingHoursRepository.save(opRecord);
+    } catch (err) {
+      this.logger.error(`Gagal menyimpan operating hours ke DB untuk bisnis ${business.id}:`, err);
+    }
+
+    return parsed;
+  }
+
   async findOne(id: string, currentUserId?: string) {
     let business = await this.businessRepository.findOne({ where: { id } });
     if (!business) {
@@ -488,6 +664,7 @@ export class BusinessesService {
     }
 
     business = await this.ensureBusinessPhotos(business);
+    const operatingHours = await this.enrichAndSaveOperatingHours(business);
 
     if (currentUserId) {
       this.recordBusinessView(currentUserId, id).catch(() => { });
@@ -514,6 +691,7 @@ export class BusinessesService {
       message: 'Berhasil mengambil detail bisnis dari PostgreSQL',
       data: {
         ...business,
+        operatingHours,
         is_claimed: isClaimed,
         claim_available: claimAvailable,
         ...(myRole ? { my_role: myRole } : {}),
@@ -536,6 +714,7 @@ export class BusinessesService {
     }
 
     business = await this.ensureBusinessPhotos(business);
+    const operatingHours = await this.enrichAndSaveOperatingHours(business);
 
     const members = await this.memberRepository.find({
       where: { businessId: business.id },
@@ -558,6 +737,7 @@ export class BusinessesService {
       message: 'Berhasil mengambil detail bisnis berdasarkan slug dari PostgreSQL',
       data: {
         ...business,
+        operatingHours,
         is_claimed: isClaimed,
         claim_available: claimAvailable,
         ...(myRole ? { my_role: myRole } : {}),
